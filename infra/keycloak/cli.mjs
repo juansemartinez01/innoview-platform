@@ -1,14 +1,16 @@
+import { migrateLogout } from './migrate-logout.mjs';
 import { configuration } from './contract.mjs';
 import { administrator, inspectRealm, provisionRealm } from './admin.mjs';
 import { verifyPublicEndpoints } from './verify.mjs';
 
 try {
   const action = process.argv[2];
-  if (!['provision', 'check'].includes(action))
-    throw new Error('Use oidc:provision or oidc:check');
+  if (!['provision', 'check', 'migrate-logout'].includes(action))
+    throw new Error('Use oidc:provision, oidc:check or oidc:migrate:logout');
   const config = configuration();
   const request = await administrator(config);
-  if (action === 'provision') await provisionRealm(request);
+  if (action === 'migrate-logout') await migrateLogout(request);
+  else if (action === 'provision') await provisionRealm(request);
   else {
     const state = await inspectRealm(request);
     if (!state.exists || state.differences.length)

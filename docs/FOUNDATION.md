@@ -4,7 +4,7 @@ Fecha de selección: 2026-10-24. No se cambia el stack acordado.
 
 ## Estado de cierre — 2026-10-25
 
-Criterios técnicos verificados y Fase 0 oficialmente cerrada por el usuario tras revisar c069a9a y Actions. Este cierre cubre herramientas, infraestructura local y persistencia técnica. Fase 1: 1.1 aprobado y 1.2 integra login/sesiones BFF y JWT según OIDC.md (ADR-025/026/027), pendiente revisión. No hay entidades empresariales ni RLS. La evidencia siguiente es el cierre histórico de Fase 0; las verificaciones runtime actuales están en OIDC.md.
+Criterios técnicos verificados y Fase 0 oficialmente cerrada por el usuario tras revisar c069a9a y Actions. Este cierre cubre herramientas, infraestructura local y persistencia técnica. Fase 1: 1.1/1.2 aprobados; 1.3 integra UserIdentity local y retorno SSO servidor, pendiente revisión (OIDC.md, ADR-028/029). No hay organizaciones, afiliaciones empresariales ni RLS. La evidencia siguiente es el cierre histórico de Fase 0; verificaciones y privilegios actuales están en OIDC.md/README.
 
 | Incremento                   | Estado y evidencia                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------ |

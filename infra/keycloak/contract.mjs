@@ -28,7 +28,9 @@ export function configuration(env = process.env, test = false) {
   };
 }
 
-export function desiredRealm() {
+export function desiredRealm(version = 2) {
+  if (![1, 2].includes(version))
+    throw new Error('Unsupported OIDC contract version');
   const clients = CLIENT_IDS.map((clientId, index) => {
     const origin = `http://127.0.0.1:${3000 + index}`;
     return {
@@ -51,7 +53,8 @@ export function desiredRealm() {
       attributes: {
         'innoview.managed-by': MANAGER,
         'pkce.code.challenge.method': 'S256',
-        'post.logout.redirect.uris': `${origin}/`,
+        'post.logout.redirect.uris':
+          version === 1 ? `${origin}/` : `${origin}/auth/logout/callback`,
         'oauth2.device.authorization.grant.enabled': 'false',
         'oidc.ciba.grant.enabled': 'false',
         'standard.token.exchange.enabled': 'false',
@@ -78,7 +81,7 @@ export function desiredRealm() {
     refreshTokenMaxReuse: 0,
     attributes: {
       'innoview.managed-by': MANAGER,
-      'innoview.contract-version': '1',
+      'innoview.contract-version': String(version),
     },
     clientScopes: [
       {

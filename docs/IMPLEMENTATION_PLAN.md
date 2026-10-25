@@ -20,19 +20,19 @@ Desarrollo por incrementos verticales con pruebas, no implementación simultáne
 - [x] 0.5 — TypeORM/pg, roles, migraciones y PostgreSQL real. Aprobado por el usuario; evidencia en FOUNDATION.md.
 - [x] 0.6 — Verificación integral desde clon limpio, aplicaciones, persistencia, seguridad y documentación. Aprobado; Fase 0 oficialmente cerrada por el usuario.
 
-0.1–0.6 aprobados. Fase 0 oficialmente cerrada el 2026-10-25; evidencia en FOUNDATION.md. 1.1 aprobado; Fase 1 autorizada exclusivamente hasta 1.2. Contrato/runtime en OIDC.md; módulos posteriores como análisis en PHASE_1_PREPARATION.md.
+0.1–0.6 aprobados. Fase 0 oficialmente cerrada el 2026-10-25; evidencia en FOUNDATION.md. 1.1/1.2 aprobados; Fase 1 autorizada exclusivamente hasta 1.3. Contrato/runtime en OIDC.md; módulos posteriores como análisis en PHASE_1_PREPARATION.md.
 
 ### Fase 1 — Identidad y organizaciones
 
 - [x] 1.1 — Realm innoview, clientes Code + PKCE separados, issuer/audiencias/scopes, aprovisionamiento sin overwrite, contrato de sesiones, librerías y pruebas OIDC. Aprobado por el usuario en 6de8c38; ADR-025/026 y OIDC.md.
-- [x] 1.2 — Integración runtime: login/logout en ambos Next.js, sesiones técnicas HttpOnly/servidor cifrado, CSRF, refresh serializado, Guard JWT y GET /auth/me. Pruebas reales PostgreSQL/Keycloak/HTTP. Pendiente revisión antes de continuar; ADR-027 y OIDC.md.
-- [ ] 1.3 — Identity local: UserIdentity referenciada por issuer/sub y contrato público de identidad; sin contraseñas locales ni autorización implícita.
+- [x] 1.2 — Integración runtime: login/logout en ambos Next.js, sesiones técnicas HttpOnly/servidor cifrado, CSRF, refresh serializado, Guard JWT y GET /auth/me. Aprobado en 6f73da9; mejora del retorno SSO completada en 1.3. ADR-027 y OIDC.md.
+- [x] 1.3 — Identity local: UserIdentity UUID/issuer/sub/fechas, unicidad PostgreSQL, registro concurrente idempotente y PUT/GET /identity/me protegidos; separación Authentication/Identity y permisos mínimos. Retorno SSO directo al servidor, contrato v2/migración explícita reanudable y pruebas reales. Pendiente revisión antes de Organizations; ADR-028/029 y OIDC.md.
 - [ ] 1.4 — Organizations: Tenant, BusinessGroup, Company, Branch y OrganizationalUnit, migraciones/constraints y contratos por módulo.
 - [ ] 1.5 — Memberships: identidad/tenant, estados y bootstrap controlado. Acordar previamente consulta de membresías con el futuro aislamiento fail-closed.
 - [ ] 1.6 — Contexto organizacional: consulta de organizaciones accesibles y selector, sin confiar en el contexto del frontend.
       **Aceptación final:** identidad central y relaciones organizacionales verificables. La autorización empresarial y RLS siguen en Fase 2; no declarar acceso multi-tenant seguro antes de incorporarlos.
 
-Los números 1.2–1.6 formalizan la secuencia solicitada: primero runtime, luego identidad local y organizaciones. El modelo aprobado no cambia. Solo 1.1/1.2 están implementados. Recomendación posterior a la revisión: acordar 1.3 con contrato de identidad y bootstrap, sin adelantar organizaciones/RBAC/RLS. No iniciado.
+Los números 1.2–1.6 formalizan la secuencia solicitada: primero runtime, luego identidad local y organizaciones. El modelo aprobado no cambia. Solo 1.1–1.3 están implementados. Después de revisar 1.3, acordar 1.4 Organizations con constraints y contratos de módulo antes de implementar. No iniciado; no se adelantan organizaciones, membresías, bootstrap administrativo, RBAC ni RLS.
 
 ### Fase 2 — Autorización y aislamiento
 

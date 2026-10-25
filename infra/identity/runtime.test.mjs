@@ -20,7 +20,7 @@ const pg = requireApi('pg');
 const requireBff = createRequire(
   new URL('../../packages/identity-bff/package.json', import.meta.url),
 );
-const { unsealData } = requireBff('iron-session');
+const { unsealData, sealData } = requireBff('iron-session');
 const { provisionDatabase } =
   await import('../../apps/api/dist/persistence/provision.js');
 const { createDataSource } =
@@ -190,7 +190,13 @@ await test(
       }
       throw new Error(`Disposable ${app} startup timeout`);
     }
-    async function login(browser, mutate, callbackMutate) {
+    async function login(
+      browser,
+      mutate,
+      callbackMutate,
+      username = 'runtime-test',
+      captureTokens = false,
+    ) {
       const initial = await browser.session();
       const start = await browser.post('/auth/login', initial.csrf);
       assert.equal(start.status, 303);
@@ -219,7 +225,7 @@ await test(
         redirect: 'manual',
         headers: { cookie, origin: kc.baseUrl },
         body: new URLSearchParams({
-          username: 'runtime-test',
+          username,
           password: userPassword,
           credentialId: '',
         }),
@@ -236,14 +242,89 @@ await test(
       const callback = new URL(response.headers.get('location'));
       const original = callback.href;
       if (callbackMutate) callbackMutate(callback);
+      const transaction = stores[
+        browser.origin === env.PORTAL_ORIGIN ? 0 : 1
+      ].unseal(pending.at(-1));
+      let tokens;
+      if (captureTokens) {
+        // Test harness only: obtain genuine IdP tokens for negative API tests
+        // without registering a local identity via the BFF. Never sent to UI.
+        const tokenResponse = await fetch(
+          `${kc.issuer}/protocol/openid-connect/token`,
+          {
+            method: 'POST',
+            body: new URLSearchParams({
+              grant_type: 'authorization_code',
+              client_id: authUrl.searchParams.get('client_id'),
+              redirect_uri: authUrl.searchParams.get('redirect_uri'),
+              code: callback.searchParams.get('code'),
+              code_verifier: transaction.verifier,
+            }),
+          },
+        );
+        assert.equal(tokenResponse.status, 200);
+        tokens = await tokenResponse.json();
+        // Burn the outstanding app transaction through state rejection; this
+        // makes no second exchange of the already consumed authorization code.
+        callback.searchParams.set('state', 'invalid-test-cleanup');
+      }
       const result = await browser.request(callback.href);
       return {
         result,
         callback: original,
-        transaction: stores[
-          browser.origin === env.PORTAL_ORIGIN ? 0 : 1
-        ].unseal(pending.at(-1)),
+        transaction,
+        tokens,
       };
+    }
+    async function providerLogout(browser) {
+      const current = await browser.session();
+      const response = await browser.post('/auth/logout', current.csrf, {
+        sso: 'true',
+      });
+      assert.equal(response.status, 303);
+      const url = new URL(response.headers.get('location'));
+      assert.equal(url.origin, kc.baseUrl);
+      assert.equal(url.searchParams.get('id_token_hint'), null);
+      assert.equal(
+        url.searchParams.get('post_logout_redirect_uri'),
+        `${browser.origin}/auth/logout/callback`,
+      );
+      const confirmation = await fetch(url, {
+        redirect: 'manual',
+        headers: {
+          cookie: [...browser.idpCookies]
+            .map(([k, v]) => `${k}=${v}`)
+            .join('; '),
+        },
+      });
+      assert.equal(confirmation.status, 200);
+      const html = await confirmation.text();
+      const action = html
+        .match(/<form[^>]+action="([^"]+)"/i)?.[1]
+        ?.replaceAll('&amp;', '&');
+      assert.ok(action);
+      const body = new URLSearchParams();
+      for (const match of html.matchAll(
+        /<input[^>]+name="([^"]+)"[^>]*value="([^"]*)"/g,
+      ))
+        body.set(match[1], match[2]);
+      const done = await fetch(new URL(action, kc.baseUrl), {
+        method: 'POST',
+        redirect: 'manual',
+        headers: {
+          cookie: confirmation.headers
+            .getSetCookie()
+            .map((line) => line.split(';')[0])
+            .join('; '),
+        },
+        body,
+      });
+      assert.ok([302, 303].includes(done.status));
+      const target = new URL(done.headers.get('location'));
+      assert.equal(target.origin, browser.origin);
+      assert.equal(target.pathname, '/auth/logout/callback');
+      assert.ok(target.searchParams.get('state'));
+      return target;
     }
     async function storedSession(browser, index) {
       const store = stores[index];
@@ -279,7 +360,8 @@ await test(
         const origin = i === 0 ? env.PORTAL_ORIGIN : env.CONTROL_ORIGIN;
         realm.clients[i].redirectUris = [`${origin}/auth/callback`];
         realm.clients[i].webOrigins = [origin];
-        realm.clients[i].attributes['post.logout.redirect.uris'] = `${origin}/`;
+        realm.clients[i].attributes['post.logout.redirect.uris'] =
+          `${origin}/auth/logout/callback`;
       }
       assert.equal(
         (await admin('realms', { method: 'POST', body: realm })).status,
@@ -420,16 +502,8 @@ await test(
                 : 'innoview-control-center',
             );
           }
-          portalRow = (
-            await stores[0].source.query(
-              `SELECT * FROM portal_sessions.sessions WHERE kind='session'`,
-            )
-          )[0];
-          controlRow = (
-            await stores[1].source.query(
-              `SELECT * FROM control_sessions.sessions WHERE kind='session'`,
-            )
-          )[0];
+          portalRow = await storedSession(portal, 0);
+          controlRow = await storedSession(control, 1);
           portalData = stores[0].unseal(portalRow);
           controlData = stores[1].unseal(controlRow);
           sensitive.push(
@@ -462,6 +536,220 @@ await test(
             ),
           );
           assert.ok(!portalRow.encrypted.includes(portalData.access));
+        },
+      );
+      await t.test(
+        'local identity is created at login and shared by repeated Portal/Control Center authentication without affiliations',
+        async () => {
+          const portalIdentity = (await portal.session()).identity;
+          const controlIdentity = (await control.session()).identity;
+          assert.match(portalIdentity.id, /^[0-9a-f-]{36}$/);
+          assert.equal(portalIdentity.id, controlIdentity.id);
+          const rows = await migrator.query(
+            'SELECT * FROM identity.user_identity',
+          );
+          assert.equal(rows.length, 1);
+          const first = rows[0];
+          for (const method of ['GET', 'PUT']) {
+            const response = await fetch(`${env.AUTH_API_ORIGIN}/identity/me`, {
+              method,
+              headers: { authorization: `Bearer ${portalData.access}` },
+            });
+            assert.equal(response.status, 200);
+            const body = await response.json();
+            assert.equal(body.id, first.id);
+            assert.deepEqual(Object.keys(body).sort(), [
+              'createdAt',
+              'externalSubject',
+              'id',
+              'issuer',
+              'updatedAt',
+            ]);
+          }
+          const spoof = await fetch(`${env.AUTH_API_ORIGIN}/identity/me`, {
+            method: 'PUT',
+            headers: {
+              authorization: `Bearer ${portalData.access}`,
+              'content-type': 'application/json',
+            },
+            body: JSON.stringify({
+              issuer: 'https://untrusted.invalid',
+              sub: 'forged',
+              tenant_id: 'forged',
+              role: 'admin',
+            }),
+          });
+          assert.equal(spoof.status, 400);
+          for (const method of ['GET', 'PUT'])
+            assert.equal(
+              (await fetch(`${env.AUTH_API_ORIGIN}/identity/me`, { method }))
+                .status,
+              401,
+            );
+          assert.equal(
+            (
+              await fetch(`${env.AUTH_API_ORIGIN}/identity/me`, {
+                method: 'PUT',
+                headers: { authorization: `Bearer ${portalData.idToken}` },
+              })
+            ).status,
+            401,
+          );
+          const after = (
+            await migrator.query('SELECT * FROM identity.user_identity')
+          )[0];
+          assert.deepEqual(after, first);
+          const tables = await migrator.query(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') AND table_type='BASE TABLE'",
+          );
+          assert.deepEqual(tables.map((row) => row.table_name).sort(), [
+            'migrations',
+            'persistence_probe',
+            'sessions',
+            'sessions',
+            'user_identity',
+          ]);
+        },
+      );
+      await t.test(
+        'first concurrent registration for a second authenticated subject returns exactly one new stable UUID',
+        async () => {
+          await admin('realms/innoview/users', {
+            method: 'POST',
+            body: {
+              username: 'runtime-second',
+              firstName: 'Second',
+              lastName: 'Test',
+              email: 'second@example.invalid',
+              emailVerified: true,
+              enabled: true,
+              credentials: [
+                { type: 'password', value: userPassword, temporary: false },
+              ],
+            },
+          });
+          const second = new Browser(env.PORTAL_ORIGIN);
+          const { tokens } = await login(
+            second,
+            undefined,
+            undefined,
+            'runtime-second',
+            true,
+          );
+          sensitive.push(
+            tokens.access_token,
+            tokens.refresh_token,
+            tokens.id_token,
+          );
+          const headers = { authorization: `Bearer ${tokens.access_token}` };
+          assert.equal(
+            (await fetch(`${env.AUTH_API_ORIGIN}/identity/me`, { headers }))
+              .status,
+            404,
+          );
+          const responses = await Promise.all(
+            Array.from({ length: 16 }, () =>
+              fetch(`${env.AUTH_API_ORIGIN}/identity/me`, {
+                method: 'PUT',
+                headers,
+              }),
+            ),
+          );
+          assert.ok(responses.every((response) => response.status === 200));
+          const identities = await Promise.all(
+            responses.map((response) => response.json()),
+          );
+          assert.equal(
+            new Set(identities.map((identity) => identity.id)).size,
+            1,
+          );
+          assert.notEqual(
+            identities[0].id,
+            (await portal.session()).identity.id,
+          );
+          assert.equal(
+            (
+              await migrator.query(
+                'SELECT count(*)::int AS count FROM identity.user_identity',
+              )
+            )[0].count,
+            2,
+          );
+          const again = await fetch(`${env.AUTH_API_ORIGIN}/identity/me`, {
+            method: 'PUT',
+            headers,
+          });
+          assert.deepEqual(await again.json(), identities[0]);
+        },
+      );
+      await t.test(
+        'an authenticated legacy 1.2 session acquires its UUID without discarding the session',
+        async () => {
+          await admin('realms/innoview/users', {
+            method: 'POST',
+            body: {
+              username: 'runtime-legacy',
+              firstName: 'Legacy',
+              lastName: 'Test',
+              email: 'legacy@example.invalid',
+              emailVerified: true,
+              enabled: true,
+              credentials: [
+                { type: 'password', value: userPassword, temporary: false },
+              ],
+            },
+          });
+          const legacy = new Browser(env.PORTAL_ORIGIN);
+          const { tokens } = await login(
+            legacy,
+            undefined,
+            undefined,
+            'runtime-legacy',
+            true,
+          );
+          sensitive.push(
+            tokens.access_token,
+            tokens.refresh_token,
+            tokens.id_token,
+          );
+          const subject = decodeJwt(tokens.access_token).sub;
+          assert.equal(
+            (
+              await fetch(`${env.AUTH_API_ORIGIN}/identity/me`, {
+                headers: { authorization: `Bearer ${tokens.access_token}` },
+              })
+            ).status,
+            404,
+          );
+          const id = await stores[0].create(
+            'session',
+            {
+              csrf: secret(),
+              issuer: kc.issuer,
+              subject,
+              access: tokens.access_token,
+              refresh: tokens.refresh_token,
+              idToken: tokens.id_token,
+            },
+            28800,
+            300,
+          );
+          const sealed = await sealData(
+            { id },
+            { password: env.PORTAL_COOKIE_PASSWORD, ttl: 28800 },
+          );
+          legacy.jar.set(stores[0].config.cookie.cookieName, sealed);
+          const upgraded = await legacy.session();
+          assert.equal(upgraded.authenticated, true);
+          assert.match(upgraded.identity.id, /^[0-9a-f-]{36}$/);
+          assert.equal(
+            legacy.jar.get(stores[0].config.cookie.cookieName),
+            sealed,
+          );
+          assert.equal(
+            (await legacy.session()).identity.id,
+            upgraded.identity.id,
+          );
         },
       );
       await t.test(
@@ -567,10 +855,18 @@ await test(
               },
             });
             const wrongAudience = new Browser(env.PORTAL_ORIGIN);
-            assert.equal((await login(wrongAudience)).result.status, 303);
-            const payload = stores[0].unseal(
-              await storedSession(wrongAudience, 0),
+            const { tokens } = await login(
+              wrongAudience,
+              undefined,
+              undefined,
+              'runtime-test',
+              true,
             );
+            const payload = {
+              access: tokens.access_token,
+              refresh: tokens.refresh_token,
+              idToken: tokens.id_token,
+            };
             sensitive.push(payload.access, payload.refresh, payload.idToken);
             assert.ok(
               ![decodeJwt(payload.access).aud].flat().includes('innoview-api'),
@@ -593,8 +889,18 @@ await test(
               body: { ...realmSettings, accessTokenLifespan: 1 },
             });
             const expired = new Browser(env.PORTAL_ORIGIN);
-            assert.equal((await login(expired)).result.status, 303);
-            const payload = stores[0].unseal(await storedSession(expired, 0));
+            const { tokens } = await login(
+              expired,
+              undefined,
+              undefined,
+              'runtime-test',
+              true,
+            );
+            const payload = {
+              access: tokens.access_token,
+              refresh: tokens.refresh_token,
+              idToken: tokens.id_token,
+            };
             sensitive.push(payload.access, payload.refresh, payload.idToken);
             const claims = decodeJwt(payload.access);
             assert.equal(claims.exp - claims.iat, 1);
@@ -671,64 +977,61 @@ await test(
         },
       );
       await t.test(
-        'local logout revokes the old cookie; SSO logout goes only to the configured IdP',
+        'local logout revokes the old cookie and server validates real SSO returns for both frontends',
         async () => {
           await login(portal);
           const session = await portal.session();
           const old = new Map(portal.jar);
-          const logout = await portal.post('/auth/logout', session.csrf);
-          assert.equal(logout.status, 303);
+          assert.equal(
+            (await portal.post('/auth/logout', session.csrf)).status,
+            303,
+          );
           portal.jar = old;
           assert.equal((await portal.session()).authenticated, false);
-          await login(control);
-          const controlSession = await control.session();
-          const sso = await control.post('/auth/logout', controlSession.csrf, {
-            sso: 'true',
-          });
-          assert.equal(sso.status, 303);
-          const url = new URL(sso.headers.get('location'));
-          assert.equal(url.origin, kc.baseUrl);
-          assert.equal(url.searchParams.get('id_token_hint'), null);
-          const confirmation = await fetch(url, {
-            redirect: 'manual',
-            headers: {
-              cookie: [...control.idpCookies]
-                .map(([k, v]) => `${k}=${v}`)
-                .join('; '),
-            },
-          });
-          assert.equal(confirmation.status, 200);
-          // Keycloak's confirmation form is the real provider logout, not a fake
-          // application route. Submit only its own CSRF-protected form.
-          const html = await confirmation.text();
-          const action = html
-            .match(/<form[^>]+action="([^"]+)"/i)?.[1]
-            ?.replaceAll('&amp;', '&');
-          assert.ok(action);
-          const body = new URLSearchParams();
-          for (const match of html.matchAll(
-            /<input[^>]+name="([^"]+)"[^>]*value="([^"]*)"/g,
-          ))
-            body.set(match[1], match[2]);
-          const done = await fetch(new URL(action, kc.baseUrl), {
-            method: 'POST',
-            redirect: 'manual',
-            headers: {
-              cookie: confirmation.headers
-                .getSetCookie()
-                .map((line) => line.split(';')[0])
-                .join('; '),
-            },
-            body,
-          });
-          assert.ok([302, 303].includes(done.status));
-          const target = new URL(done.headers.get('location'));
-          assert.equal(target.origin, env.CONTROL_ORIGIN);
-          const finish = await control.request(
-            `/auth/logout/callback?state=${encodeURIComponent(target.searchParams.get('state'))}`,
-          );
-          assert.equal(finish.status, 303);
-          assert.equal((await control.session()).authenticated, false);
+          for (const browser of [portal, control]) {
+            await login(browser);
+            assert.equal(
+              (await browser.request('/auth/logout/callback?state=forged'))
+                .status,
+              400,
+            );
+            assert.equal((await browser.session()).authenticated, true);
+            const target = await providerLogout(browser);
+            const pending = new Map(browser.jar);
+            const finish = await browser.request(target.href); // exact real IdP Location, no JS relay
+            assert.equal(finish.status, 303);
+            assert.equal(finish.headers.get('location'), `${browser.origin}/`);
+            browser.jar = pending;
+            assert.equal((await browser.request(target.href)).status, 400);
+            assert.equal((await browser.session()).authenticated, false);
+          }
+        },
+      );
+      await t.test(
+        'SSO return rejects missing, incorrect and duplicate state; failed transactions cannot be replayed',
+        async () => {
+          for (const mode of ['missing', 'incorrect', 'duplicate', 'unicode']) {
+            const browser = new Browser(
+              mode === 'incorrect' ? env.PORTAL_ORIGIN : env.CONTROL_ORIGIN,
+            );
+            assert.equal((await login(browser)).result.status, 303);
+            const target = await providerLogout(browser);
+            const original = new URL(target);
+            const pending = new Map(browser.jar);
+            if (mode === 'missing') target.searchParams.delete('state');
+            else if (mode === 'incorrect')
+              target.searchParams.set('state', 'wrong');
+            else if (mode === 'unicode')
+              target.searchParams.set(
+                'state',
+                '\u00e9'.repeat(target.searchParams.get('state').length),
+              );
+            else target.searchParams.append('state', 'duplicate');
+            assert.equal((await browser.request(target.href)).status, 400);
+            browser.jar = pending;
+            assert.equal((await browser.request(original.href)).status, 400);
+            assert.equal((await browser.session()).authenticated, false);
+          }
         },
       );
       await t.test(

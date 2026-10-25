@@ -145,7 +145,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await t.test(
       'migrator applies the real migration and owns the technical table',
       async () => {
-        assert.equal((await migrator.runMigrations()).length, 2);
+        assert.equal((await migrator.runMigrations()).length, 3);
         assert.equal(await migrator.showMigrations(), false);
         const [owner] = await migrator.query<{ owner: string }[]>(
           "SELECT pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid='foundation.persistence_probe'::regclass",
@@ -184,6 +184,118 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
             "SELECT setval('foundation.persistence_probe_id_seq', 100)",
           ),
           (error) => sqlState(error, '42501'),
+        );
+      },
+    );
+
+    await t.test(
+      'UserIdentity has a real unique pair, PK/FK integrity and minimal schema privileges',
+      async () => {
+        const pair = [
+          'https://identity.example.invalid/realms/test',
+          'subject-one',
+        ];
+        const [first] = await app.query<
+          { id: string; created_at: Date; updated_at: Date }[]
+        >(
+          'INSERT INTO identity.user_identity(issuer,external_subject) VALUES ($1,$2) RETURNING *',
+          pair,
+        );
+        assert.match(first.id, /^[0-9a-f-]{36}$/);
+        assert.equal(first.created_at.getTime(), first.updated_at.getTime());
+        await assert.rejects(
+          app.query(
+            'INSERT INTO identity.user_identity(issuer,external_subject) VALUES ($1,$2)',
+            pair,
+          ),
+          (error) => sqlState(error, '23505'),
+        );
+        await assert.rejects(
+          app.query(
+            "INSERT INTO identity.user_identity(issuer,external_subject) VALUES ('','x')",
+          ),
+          (error) => sqlState(error, '23514'),
+        );
+        await assert.rejects(
+          app.query(
+            "INSERT INTO identity.user_identity(issuer,external_subject) VALUES ('x',NULL)",
+          ),
+          (error) => sqlState(error, '23502'),
+        );
+        const different = await app.query<{ id: string }[]>(
+          'INSERT INTO identity.user_identity(issuer,external_subject) VALUES ($1,$2),($3,$4) RETURNING id',
+          [
+            pair[0],
+            'subject-two',
+            'https://another.example.invalid/realms/test',
+            pair[1],
+          ],
+        );
+        assert.equal(
+          new Set([first.id, ...different.map((row) => row.id)]).size,
+          3,
+        );
+        for (const sql of [
+          'UPDATE identity.user_identity SET issuer=issuer',
+          'DELETE FROM identity.user_identity',
+          'TRUNCATE identity.user_identity',
+          'CREATE TABLE identity.forbidden(id int)',
+          'SELECT * FROM platform_meta.migrations',
+        ])
+          await assert.rejects(app.query(sql), (error) =>
+            sqlState(error, '42501'),
+          );
+        for (const kind of ['portal', 'control'] as const) {
+          const client = new pg.Client(connectionConfig(kind, env));
+          await client.connect();
+          try {
+            await assert.rejects(
+              client.query('SELECT * FROM identity.user_identity'),
+              (error) => sqlState(error, '42501'),
+            );
+          } finally {
+            await client.end();
+          }
+        }
+        // A technical FK fixture exists only in this disposable DB. No future
+        // Membership/organization table is introduced by the production migration.
+        await migrator.query(
+          'CREATE TABLE identity.reference_probe(identity_id uuid REFERENCES identity.user_identity(id) ON DELETE RESTRICT)',
+        );
+        try {
+          await migrator.query(
+            'INSERT INTO identity.reference_probe VALUES ($1)',
+            [first.id],
+          );
+          await assert.rejects(
+            migrator.query('INSERT INTO identity.reference_probe VALUES ($1)', [
+              randomUUID(),
+            ]),
+            (error) => sqlState(error, '23503'),
+          );
+          await assert.rejects(
+            migrator.query('DELETE FROM identity.user_identity WHERE id=$1', [
+              first.id,
+            ]),
+            (error) => sqlState(error, '23001'),
+          );
+          await assert.rejects(
+            migrator.query('DROP TABLE identity.user_identity'),
+            (error) => sqlState(error, '2BP01'),
+          );
+        } finally {
+          await migrator.query('DROP TABLE identity.reference_probe');
+        }
+        await provisionDatabase(env);
+        await assert.rejects(
+          app.query('DELETE FROM identity.user_identity'),
+          (error) => sqlState(error, '42501'),
+        );
+        const changes = await migrator.driver.createSchemaBuilder().log();
+        assert.deepEqual(
+          changes.upQueries.map((query) => query.query),
+          [],
+          'Entity metadata must match the versioned schema',
         );
       },
     );
@@ -341,6 +453,23 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
           },
         );
         assert.equal(revert.status, 0, revert.stderr);
+        await assert.rejects(
+          app.query('SELECT * FROM identity.user_identity'),
+          (error) => sqlState(error, '42P01'),
+        );
+        const revertSessions = spawnSync(
+          process.execPath,
+          [
+            fileURLToPath(new URL('./migration.cli.js', import.meta.url)),
+            'revert',
+          ],
+          {
+            env: { ...process.env, ...env, DB_DISPOSABLE: 'true' },
+            encoding: 'utf8',
+            windowsHide: true,
+          },
+        );
+        assert.equal(revertSessions.status, 0, revertSessions.stderr);
         const revertProbe = spawnSync(
           process.execPath,
           [

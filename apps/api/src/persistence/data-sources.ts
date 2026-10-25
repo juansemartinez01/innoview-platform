@@ -1,4 +1,5 @@
 import 'reflect-metadata';
+import { UserIdentity } from '../identity/user-identity.entity.js';
 import { DataSource } from 'typeorm';
 import { fileURLToPath } from 'node:url';
 import { connectionConfig, type Environment } from './connection.config.js';
@@ -10,6 +11,8 @@ export function createDataSource(
   const config = connectionConfig(purpose, env);
   return new DataSource({
     type: 'postgres',
+    uuidExtension: 'pgcrypto',
+    installExtensions: false,
     host: config.host,
     port: config.port,
     database: config.database,
@@ -30,7 +33,7 @@ export function createDataSource(
             ).replaceAll('\\', '/'),
           ]
         : [],
-    entities: [],
+    entities: [UserIdentity],
     logging: false,
     poolSize: 5,
   });
@@ -80,7 +83,7 @@ export async function validateMigratorConnection(
       OR has_database_privilege(current_user, current_database(), 'CREATE')
       OR has_database_privilege(current_user, current_database(), 'TEMP')
       OR (SELECT count(*) FROM pg_namespace WHERE nspname IN ('foundation','platform_meta') AND nspowner=r.oid) <> 2
-      OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=r.oid AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions'))
+      OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=r.oid AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions','identity'))
     ) AS unsafe FROM pg_roles r WHERE rolname = current_user`);
     if (!role || role.unsafe) throw new Error('Unsafe migration role');
   } catch {

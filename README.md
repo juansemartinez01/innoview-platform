@@ -1,6 +1,6 @@
 # Innoview Platform
 
-Fase 0 cerrada e incremento 1.1 aprobado. Incremento 1.2: autenticación runtime y sesiones implementadas, pendiente revisión. Fuente de verdad: AGENTS.md y docs/. Sin organizaciones, autorización empresarial ni aislamiento multi-tenant.
+Fase 0 cerrada e incrementos 1.1/1.2 aprobados. Incremento 1.3: identidad local y retorno SSO en servidor implementados, pendiente revisión. Fuente de verdad: AGENTS.md y docs/. Sin organizaciones, autorización empresarial ni aislamiento multi-tenant.
 
 ## Requisitos
 
@@ -52,7 +52,7 @@ pnpm oidc:provision
 pnpm oidc:check
 ```
 
-Resultado esperado: tres servicios `healthy` y las dos migraciones FoundationProbe/BffSessions marcadas `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`. El login de aplicaciones usa cuentas del realm innoview, no administradores master.
+Resultado esperado: tres servicios `healthy` y las tres migraciones FoundationProbe/BffSessions/UserIdentity marcadas `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`. El login de aplicaciones usa cuentas del realm innoview, no administradores master.
 
 Validar calidad y pruebas en PostgreSQL y Keycloak temporales independientes:
 
@@ -101,9 +101,9 @@ Las páginas permiten login/logout y muestran identidad técnica. GET /auth/me v
 
 ## Límites actuales
 
-identity-bff tiene dos consumidores Next.js reales; sin paquetes vacíos, módulos comerciales ni worker. TypeORM y PostgreSQL contienen objetos técnicos de Foundation y sesiones. Sin Tenant/Company/Branch/UserIdentity/Membership, RLS ni UoW. OIDC y sesiones runtime implementados en 1.2; Keycloak conserva cuentas y contraseñas empresariales.
+identity-bff tiene dos consumidores Next.js reales; sin paquetes vacíos, módulos comerciales ni worker. TypeORM y PostgreSQL contienen objetos de Foundation, sesiones y UserIdentity local. Sin Tenant/Company/Branch/Membership, RLS ni UoW. Keycloak conserva cuentas y contraseñas empresariales; UserIdentity solo referencia issuer/sub con UUID propio.
 
-## Autenticación runtime — 1.2
+## Autenticación e identidad local — 1.3
 
 Para actualizar una instalación existente, conservar `.env`. Agregar solo las variables faltantes de `.env.example`; este comando no cambia contraseñas ni claves anteriores:
 
@@ -129,22 +129,29 @@ docker compose up -d --wait --wait-timeout 240
 pnpm db:provision
 pnpm db:run
 pnpm db:show
+pnpm oidc:migrate:logout
 pnpm oidc:provision
 pnpm oidc:check
 pnpm dev
 ```
 
+El bloque anterior actualiza un entorno existente: db:provision agrega identity y ACL mínimas, db:run aplica UserIdentity1792922400000 y oidc:migrate:logout migra explícitamente los dos redirects al contrato v2. En un entorno limpio seguir el inicio desde clon nuevo: oidc:provision crea v2 directamente y no se ejecuta la migración de realm ausente. No hay variables ni dependencias nuevas en 1.3.
+
+La migración OIDC requiere una ventana de mantenimiento sin ediciones simultáneas en Keycloak. Solo acepta v1/v1 parcial/v2 conocidos y compara campos gestionados; drift ajeno falla sin forzarlo. Es reanudable e idempotente, conserva IDs/usuarios/claves/clientes ajenos. Admin REST no ofrece transacción/CAS del conjunto: coordinar runtime e IdP, no mezclar versiones. No borrar volúmenes ni exportar secretos al repositorio. Detalle operativo en OIDC.md y ADR-029.
+
 Para una cuenta real de desarrollo abrir la consola Keycloak en http://127.0.0.1:8080/admin/, seleccionar **innoview** y crear un usuario habilitado con perfil requerido completo y contraseña local. No asignar realm-management ni utilizar administradores master como usuarios de aplicaciones. No versionar usuarios/contraseñas. Los tests utilizan sus propias cuentas efímeras en otro servidor.
 
-Abrir Portal http://127.0.0.1:3000 o Control Center http://127.0.0.1:3001, pulsar **Iniciar sesión**, autenticar en Keycloak y volver a la pantalla técnica. Control Center no ofrece operaciones administrativas. Hay logout local y SSO; el segundo requiere confirmación en Keycloak y vuelve a raíz. Recargar comprueba expiración/refresh; no hay polling que mantenga viva una sesión inactiva.
+Abrir Portal http://127.0.0.1:3000 o Control Center http://127.0.0.1:3001, pulsar **Iniciar sesión**, autenticar en Keycloak y volver a la pantalla técnica con el UUID interno. El mismo usuario obtiene el mismo UUID en ambas apps, sin privilegios administrativos. Hay logout local y SSO; el segundo confirma en Keycloak y vuelve directamente a /auth/logout/callback, que valida state en servidor y redirige a raíz sin JavaScript. State ausente/incorrecto/duplicado/repetido devuelve 400. Recargar comprueba expiración/refresh; no hay polling que mantenga viva una sesión inactiva.
 
-Rutas BFF en ambas apps: POST /auth/login, GET /auth/callback, GET /auth/session, POST /auth/logout y GET /auth/logout/callback. POST exige Origin/CSRF. GET API /auth/me exige un access token Bearer válido; sin token responde 401. El navegador recibe identidad mínima y CSRF, nunca access/refresh tokens.
+Rutas BFF en ambas apps: POST /auth/login, GET /auth/callback, GET /auth/session, POST /auth/logout y GET /auth/logout/callback. POST exige Origin/CSRF. GET API /auth/me conserva el principal OIDC. PUT /identity/me registra/resuelve la identidad propia y GET /identity/me la consulta (404 si no está registrada); ambos requieren Bearer válido, sin token responden 401. PUT solo admite body vacío y obtiene issuer/sub del Guard. La UI recibe UUID/identidad mínima y CSRF, nunca access/refresh tokens.
+
+UserIdentity vive en identity.user_identity: UUID v4, issuer, external_subject, created_at/updated_at, pareja OIDC única en PostgreSQL. INSERT ON CONFLICT DO NOTHING y lectura posterior soportan concurrencia sin cambiar UUID/fechas. No hay email, contraseñas, tokens ni afiliaciones; updated_at no es last_login. AuthenticationModule verifica tokens; IdentityModule administra el registro. El BFF resuelve identidad al completar login y permite incorporar UUID a sesiones válidas de 1.2 sin descartarlas. Datos/modelo y límites en DATA_MODEL.md/ADR-028.
 
 Issuer canónico: http://127.0.0.1:8080/realms/innoview. Clientes separados Code + PKCE S256, state/nonce, callbacks exactos en 3000/3001, audiencia innoview-api y scope openid. Cookies HttpOnly con SID sellado y claves independientes; payload servidor AES-256-GCM. Los roles innoview_portal/innoview_control solo acceden a portal_sessions/control_sessions respectivamente; API no puede leer sesiones. El .env conjunto es exclusivamente local: cada proceso desplegado debe recibir solo sus propias variables, sin bootstrap/migrador ni claves de la otra app. HTTPS/Secure obligatorios fuera de la excepción HTTP loopback explícita.
 
 El aprovisionador crea únicamente un realm ausente. Si existe, verifica marca y campos del contrato; cualquier diferencia termina sin sobrescribir clientes. No tiene force/import override ni elimina datos. Usa credenciales administrativas locales solo para esta operación. Si falla, revisar el drift y acordar una actualización explícita; no borrar volúmenes. Realm master sigue separado y no se modifica.
 
-Contrato, refresh serializado, custodia de tokens y revocación: [docs/OIDC.md](docs/OIDC.md), ADR-025/026/027. openid-client 6.8.8 e iron-session 9.0.1 tienen consumidores BFF; jose 6.2.13 valida JWT en NestJS. Logout local no revoca access tokens ya emitidos ni sesiones de otra aplicación. Backchannel y revocación global inmediata pendientes.
+Contrato, refresh serializado, identidad, migración logout y revocación: [docs/OIDC.md](docs/OIDC.md), ADR-025 a ADR-029. openid-client 6.8.8 e iron-session 9.0.1 tienen consumidores BFF; jose 6.2.13 valida JWT en NestJS. Logout local no revoca access tokens ya emitidos ni sesiones de otra aplicación. Backchannel y revocación global inmediata pendientes.
 
 ## Infraestructura local — solo desarrollo
 
@@ -215,13 +222,13 @@ pnpm dev
 
 `db:provision` es idempotente, transaccional y funciona sobre volúmenes ya inicializados. No borra bases ni datos. Crea roles administrados, esquemas y ACL; falla ante roles/esquemas ajenos o membresías inesperadas. Repetirlo reconcilia privilegios de los objetos administrados y actualiza las contraseñas de app/migrador a los valores locales. Ejecutarlo solo como mantenimiento local controlado. La API no aprovisiona, sincroniza ni ejecuta migraciones al arrancar.
 
-| Rol                  | Privilegios en la base Platform                                                                                                                                                |
-| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| platform_local_admin | Bootstrap administrativo; solo aprovisionamiento local                                                                                                                         |
-| innoview_migrator    | CONNECT y propietario de foundation/platform_meta/portal_sessions/control_sessions y sus objetos; sin privilegios globales ni membresías                                       |
-| innoview_app         | CONNECT, USAGE en foundation, SELECT/INSERT/UPDATE/DELETE en sus tablas y USAGE en secuencias; sin propiedad, DDL, TEMP, TRUNCATE, SET ROLE migrador ni acceso a platform_meta |
-| innoview_portal      | CONNECT, USAGE/CRUD solo en portal_sessions; sin DDL, propiedad, membresías ni acceso a sesiones de Control Center                                                             |
-| innoview_control     | CONNECT, USAGE/CRUD solo en control_sessions; sin DDL, propiedad, membresías ni acceso a sesiones de Portal                                                                    |
+| Rol                  | Privilegios en la base Platform                                                                                                                                                                |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| platform_local_admin | Bootstrap administrativo; solo aprovisionamiento local                                                                                                                                         |
+| innoview_migrator    | CONNECT y propietario de foundation/platform_meta/portal_sessions/control_sessions/identity y sus objetos; sin privilegios globales ni membresías                                              |
+| innoview_app         | CRUD en foundation y USAGE de secuencias; USAGE + SELECT/INSERT en identity, sin UPDATE/DELETE allí; sin propiedad, DDL, TEMP, TRUNCATE, SET ROLE migrador, historial ni acceso a sesiones BFF |
+| innoview_portal      | CONNECT, USAGE/CRUD solo en portal_sessions; sin DDL, propiedad, membresías ni acceso a sesiones de Control Center                                                                             |
+| innoview_control     | CONNECT, USAGE/CRUD solo en control_sessions; sin DDL, propiedad, membresías ni acceso a sesiones de Portal                                                                                    |
 
 El historial TypeORM está en `platform_meta.migrations`; la tabla de demostración, en `foundation.persistence_probe`. Los defaults de tablas/secuencias se aplican a objetos futuros creados por el migrador en foundation. No se otorgan permisos genéricos a futuros módulos: cada esquema necesitará una política explícita. Los controles se aplican a la base administrada, no alteran ACL de otras bases del clúster ni reemplazan políticas de conexión de producción.
 
@@ -263,4 +270,4 @@ También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/
 
 [GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL/Keycloak temporales con contraseñas aleatorias y los detiene al terminar. No depende de servicios locales ni secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
 
-Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Próximos incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No avanzar más allá de 1.2 sin revisión.**
+Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Próximos incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No avanzar a Organizations sin revisión de 1.3.**

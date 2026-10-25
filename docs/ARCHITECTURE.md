@@ -11,7 +11,7 @@
 - Tenant: límite lógico de aislamiento de una organización cliente. Deployment: instancia de ejecución que puede alojar uno o varios tenants.
 - tenant_id y RLS aíslan tenants; la autorización del Core controla empresas y sucursales.
 - Keycloak central vía OpenID Connect (Authorization Code + PKCE) para autenticación. Core gestiona autorización.
-- Contrato de desarrollo OIDC en docs/OIDC.md, ADR-025/026: realm innoview, clientes separados, issuer canónico y aprovisionamiento/verificación. 1.2 integra sesiones BFF y Guard JWT (ADR-027); packages/identity-bff tiene dos consumidores Next.js reales. Identidad local y autorización empresarial siguen pendientes.
+- Contrato de desarrollo OIDC en docs/OIDC.md, ADR-025/026: realm innoview, clientes separados, issuer canónico y aprovisionamiento/verificación. 1.2 integra BFF/JWT (ADR-027); packages/identity-bff tiene dos consumidores reales. 1.3 separa AuthenticationModule de IdentityModule y persiste UserIdentity en esquema identity (ADR-028); contrato OIDC v2 con retorno logout directo al servidor y migración explícita (ADR-029). Organizaciones y autorización empresarial siguen pendientes.
 
 ## Paquetes previstos
 

@@ -82,7 +82,7 @@ export async function provisionDatabase(
     if (databaseOwner.rowCount)
       throw new Error('Migrator must not own databases');
     const outsideSchemas = await client.query(
-      "SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions')",
+      "SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions','identity')",
       [migrator.user],
     );
     if (outsideSchemas.rowCount)
@@ -101,6 +101,7 @@ export async function provisionDatabase(
       'platform_meta',
       'portal_sessions',
       'control_sessions',
+      'identity',
     ]) {
       const owner = await client.query<{ owner: string }>(
         'SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname=$1',
@@ -160,6 +161,14 @@ export async function provisionDatabase(
         `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA ${q(schema)} GRANT USAGE ON SEQUENCES TO ${q(role)}`,
       );
     }
+    // Identity is append/read-only at runtime; no mutation or broad grants to BFFs.
+    await client.query(`GRANT USAGE ON SCHEMA identity TO ${q(app.user)}`);
+    await client.query(
+      `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA identity TO ${q(app.user)}`,
+    );
+    await client.query(
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA identity GRANT SELECT, INSERT ON TABLES TO ${q(app.user)}`,
+    );
     await client.query('COMMIT');
   } catch {
     // Never emit PostgreSQL errors: DDL errors may contain password literals.

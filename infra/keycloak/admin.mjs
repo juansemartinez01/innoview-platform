@@ -47,14 +47,13 @@ export async function administrator(config) {
   };
 }
 
-export async function inspectRealm(request) {
+export async function inspectRealm(request, expected = desiredRealm()) {
   const realm = await request(`realms/${REALM}`);
   if (realm.status === 404) return { exists: false, differences: [] };
   if (realm.data?.attributes?.['innoview.managed-by'] !== MANAGER)
     throw new Error(
       'Existing innoview realm is not managed by this project; preserved without changes',
     );
-  const expected = desiredRealm();
   const { clients, clientScopes, ...realmFields } = expected;
   const drift = differences(realmFields, realm.data, 'realm');
   for (const client of clients) {

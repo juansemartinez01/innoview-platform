@@ -13,7 +13,12 @@
 ## Identity
 
 - Keycloak conserva cuentas, credenciales, MFA y sesiones del IdP.
-- UserIdentity local: id, issuer, external_subject (UNIQUE(issuer, external_subject)), perfil.
+- **UserIdentity implementada en 1.3:** tabla identity.user_identity, propiedad del módulo Identity. id UUID v4 interno (PK, gen_random_uuid nativo de PostgreSQL 18), issuer varchar(2048), external_subject varchar(255), created_at/updated_at timestamptz NOT NULL. Restricción PostgreSQL uq_user_identity_issuer_subject UNIQUE(issuer, external_subject), valores no vacíos. Los campos OIDC son exactos y sensibles a mayúsculas: no normalizar sub ni vincular por email.
+- No hay email, contraseñas, tokens, perfil, tenant, roles ni membresías en UserIdentity. Resolución idempotente mediante INSERT ON CONFLICT DO NOTHING y lectura posterior con snapshot nuevo; conserva UUID y fechas al repetir. updated_at se inicializa al crear y no es last_login; aún no hay operaciones de modificación de identidad.
+- La API solo obtiene la pareja desde un access token verificado. PUT /identity/me registra/resuelve y GET /identity/me consulta la identidad propia; /auth/me mantiene el principal OIDC sin persistencia. No existe búsqueda pública por UUID ajeno ni administración de identidades.
+- El esquema vacío se aprovisiona con bootstrap, como los esquemas de Foundation; el migrador no recibe CREATE global sobre la base. La migración UserIdentity1792922400000 valida propiedad y crea la tabla/constraints. API solo tiene USAGE + SELECT/INSERT en identity, sin UPDATE/DELETE/DDL; BFF sin acceso. TypeORM registra la entidad con synchronize=false e installExtensions=false, sin instalar extensiones al arrancar.
+- No hay FK al IdP externo ni a organizaciones todavía. La PK UUID queda disponible para futuras referencias explícitas; ninguna se implementa en 1.3. Las pruebas verifican FK y RESTRICT con un objeto técnico exclusivamente descartable, sin crear Membership.
+- Cambiar issuer/sub o recrear una cuenta Keycloak produce otra identidad. No hay linking por email ni transferencia automática de privilegios; una futura vinculación requerirá una decisión y un procedimiento auditado.
 - Membership: user_id, tenant_id, estado (única por combinación), revocación.
 - Invitation: email objetivo, token hash, expiración, creador, consumida/revocada.
 - ServiceAccount para integraciones máquina-máquina cuando se incorpore.

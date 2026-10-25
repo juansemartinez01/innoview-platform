@@ -3,20 +3,12 @@ import { useEffect, useState } from 'react';
 type Session = {
   authenticated: boolean;
   csrf: string;
-  identity?: { subject: string; issuer: string };
+  identity?: { id: string; subject: string; issuer: string };
 };
 export default function Home() {
   const [session, setSession] = useState<Session>();
   const [error, setError] = useState(false);
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.has('state')) {
-      window.location.replace(
-        '/auth/logout/callback?' +
-          new URLSearchParams({ state: params.get('state')! }),
-      );
-      return;
-    }
     const controller = new AbortController();
     fetch('/auth/session', { cache: 'no-store', signal: controller.signal })
       .then(async (response) => {
@@ -49,7 +41,7 @@ export default function Home() {
       ) : session.authenticated ? (
         <>
           <h2>Sesión iniciada</h2>
-          <p>Identidad: {session.identity?.subject}</p>
+          <p>Identidad: {session.identity?.id}</p>
           <form method="post" action="/auth/logout">
             <input type="hidden" name="csrf" value={session.csrf} />
             <button type="submit">Cerrar sesión local</button>

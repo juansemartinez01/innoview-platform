@@ -41,9 +41,9 @@ async function clientFor(store: Store) {
   return clients.get(config.app)!;
 }
 function equal(a: string, b: string) {
-  return (
-    a.length === b.length && timingSafeEqual(Buffer.from(a), Buffer.from(b))
-  );
+  const left = Buffer.from(a);
+  const right = Buffer.from(b);
+  return left.length === right.length && timingSafeEqual(left, right);
 }
 function json(data: object, status = 200) {
   return Response.json(data, {
@@ -192,6 +192,14 @@ export async function handle(app: App, request: Request): Promise<Response> {
           !tokens.expires_in
         )
           throw new Error('Invalid identity');
+        const registered = await fetch(`${config.apiOrigin}/identity/me`, {
+          method: 'PUT',
+          headers: { Authorization: `Bearer ${tokens.access_token}` },
+          cache: 'no-store',
+          redirect: 'error',
+          signal: AbortSignal.timeout(5000),
+        });
+        if (!registered.ok) throw new Error('Local identity unavailable');
         cookie = await getIronSession<{ id?: string }>(
           await cookies(),
           config.cookie,
@@ -224,7 +232,9 @@ export async function handle(app: App, request: Request): Promise<Response> {
         !consumed ||
         consumed.kind !== 'logout' ||
         !equal(
-          url.searchParams.get('state') ?? '',
+          url.searchParams.getAll('state').length === 1
+            ? (url.searchParams.get('state') ?? '')
+            : '',
           store.unseal(consumed).state!,
         )
       )
@@ -237,12 +247,23 @@ export async function handle(app: App, request: Request): Promise<Response> {
           ? await liveSession(store, cookie.id)
           : undefined;
       if (live) {
-        const response = await fetch(`${config.apiOrigin}/auth/me`, {
+        let response = await fetch(`${config.apiOrigin}/identity/me`, {
           headers: { Authorization: `Bearer ${live.access}` },
           cache: 'no-store',
           redirect: 'error',
           signal: AbortSignal.timeout(5000),
         });
+        if (response.status === 404) {
+          // Upgrade an already authenticated 1.2 session without discarding it.
+          // API independently validates the access token before resolving UUID.
+          response = await fetch(`${config.apiOrigin}/identity/me`, {
+            method: 'PUT',
+            headers: { Authorization: `Bearer ${live.access}` },
+            cache: 'no-store',
+            redirect: 'error',
+            signal: AbortSignal.timeout(5000),
+          });
+        }
         if (!response.ok) {
           if (response.status === 401 && cookie.id) {
             await store.revoke(cookie.id);
@@ -256,20 +277,25 @@ export async function handle(app: App, request: Request): Promise<Response> {
         const identity = (await response.json()) as {
           issuer?: string;
           subject?: string;
-          clientId?: string;
+          id?: string;
+          externalSubject?: string;
         };
         if (
           identity.issuer !== config.issuer ||
-          identity.subject !== live.subject ||
-          identity.clientId !== config.clientId
+          identity.externalSubject !== live.subject ||
+          typeof identity.id !== 'string' ||
+          !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(
+            identity.id,
+          )
         )
           throw new Error('Identity mismatch');
         return json({
           authenticated: true,
           identity: {
             issuer: identity.issuer,
-            subject: identity.subject,
-            clientId: identity.clientId,
+            id: identity.id,
+            subject: identity.externalSubject,
+            clientId: config.clientId,
           },
           csrf: live.csrf,
         });
@@ -330,11 +356,10 @@ export async function handle(app: App, request: Request): Promise<Response> {
       const state = oidc.randomState();
       const logout = oidc.buildEndSessionUrl(client, {
         client_id: config.clientId,
-        post_logout_redirect_uri: `${config.origin}/`,
+        post_logout_redirect_uri: `${config.origin}/auth/logout/callback`,
         state,
       });
-      // The approved '/' redirect is fixed. State is checked there by the UI
-      // through /auth/logout/callback before any session can be created.
+      // Keycloak returns directly to the server handler; no client-side relay.
       cookie = await getIronSession<{ id?: string }>(
         await cookies(),
         config.cookie,

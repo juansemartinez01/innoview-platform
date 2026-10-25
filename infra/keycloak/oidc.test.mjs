@@ -10,6 +10,8 @@ import {
 } from 'jose';
 import { configuration, REALM, CLIENT_IDS, API_AUDIENCE } from './contract.mjs';
 import { administrator, inspectRealm, provisionRealm } from './admin.mjs';
+import { desiredRealm } from './contract.mjs';
+import { migrateLogout } from './migrate-logout.mjs';
 import {
   apiVerifier,
   verifyAccessToken,
@@ -101,6 +103,100 @@ await test('real disposable Keycloak: reproducible OIDC contract, tokens and saf
   let portalTokens;
   let controlTokens;
   let verify;
+
+  await t.test(
+    'explicit v1 to v2 logout migration preserves clients/users/keys, rejects drift and resumes interruptions',
+    async () => {
+      assert.equal(
+        (await request('realms', { method: 'POST', body: desiredRealm(1) }))
+          .status,
+        201,
+      );
+      await request(`realms/${REALM}/clients`, {
+        method: 'POST',
+        body: {
+          clientId: 'unrelated-client',
+          enabled: true,
+          publicClient: true,
+          protocol: 'openid-connect',
+          attributes: { preserved: 'yes' },
+        },
+      });
+      await request(`realms/${REALM}/users`, {
+        method: 'POST',
+        body: { username: 'migration-fixture', enabled: true },
+      });
+      const beforeRealm = (await request(`realms/${REALM}`)).data;
+      const beforeUsers = (await request(`realms/${REALM}/users`)).data;
+      const beforeKeys = await (
+        await fetch(`${config.issuer}/protocol/openid-connect/certs`)
+      ).json();
+      const list = (await request(`realms/${REALM}/clients`)).data;
+      const other = list.find((c) => c.clientId === 'unrelated-client');
+      const originalOther = (
+        await request(`realms/${REALM}/clients/${other.id}`)
+      ).data;
+      const portal = list.find((c) => c.clientId === CLIENT_IDS[0]);
+      const path = `realms/${REALM}/clients/${portal.id}`;
+      const originalPortal = (await request(path)).data;
+      await request(path, {
+        method: 'PUT',
+        body: { redirectUris: ['http://unregistered.invalid/'] },
+      });
+      let writes = 0;
+      await assert.rejects(
+        migrateLogout((path, options = {}) => {
+          if (options.method && options.method !== 'GET') writes++;
+          return request(path, options);
+        }),
+        /drift/,
+      );
+      assert.equal(writes, 0);
+      await request(path, {
+        method: 'PUT',
+        body: { redirectUris: originalPortal.redirectUris },
+      });
+      let puts = 0;
+      await assert.rejects(
+        migrateLogout((path, options = {}) => {
+          if (options.method === 'PUT' && ++puts === 2)
+            throw new Error('Simulated interruption');
+          return request(path, options);
+        }),
+        /Simulated interruption/,
+      );
+      assert.equal(
+        (await request(`realms/${REALM}`)).data.attributes[
+          'innoview.contract-version'
+        ],
+        '1',
+      );
+      await migrateLogout(request);
+      writes = 0;
+      await migrateLogout((path, options = {}) => {
+        if (options.method && options.method !== 'GET') writes++;
+        return request(path, options);
+      });
+      assert.equal(writes, 0);
+      assert.equal((await request(`realms/${REALM}`)).data.id, beforeRealm.id);
+      assert.deepEqual(
+        (await request(`realms/${REALM}/users`)).data,
+        beforeUsers,
+      );
+      assert.deepEqual(
+        (await request(`realms/${REALM}/clients/${other.id}`)).data,
+        originalOther,
+      );
+      assert.equal((await request(path)).data.id, originalPortal.id);
+      assert.deepEqual(
+        await (
+          await fetch(`${config.issuer}/protocol/openid-connect/certs`)
+        ).json(),
+        beforeKeys,
+      );
+      await request(`realms/${REALM}`, { method: 'DELETE' }); // only this fixture
+    },
+  );
 
   await t.test(
     'create from initialized master, repeat read-only and preserve master',
@@ -258,14 +354,14 @@ await test('real disposable Keycloak: reproducible OIDC contract, tokens and saf
       const state = oidc.randomState();
       const logoutUrl = oidc.buildEndSessionUrl(controlClient, {
         id_token_hint: controlTokens.id_token,
-        post_logout_redirect_uri: 'http://127.0.0.1:3001/',
+        post_logout_redirect_uri: 'http://127.0.0.1:3001/auth/logout/callback',
         state,
       });
       const logout = await fetch(logoutUrl, { redirect: 'manual' });
       assert.equal(logout.status, 302);
       const landing = new URL(logout.headers.get('location'));
       assert.equal(landing.origin, 'http://127.0.0.1:3001');
-      assert.equal(landing.pathname, '/');
+      assert.equal(landing.pathname, '/auth/logout/callback');
       assert.equal(landing.searchParams.get('state'), state);
       logoutUrl.searchParams.set(
         'post_logout_redirect_uri',
@@ -319,6 +415,7 @@ await test('real disposable Keycloak: reproducible OIDC contract, tokens and saf
         },
       });
       await assert.rejects(provisionRealm(request), /not managed/);
+      await assert.rejects(migrateLogout(request));
       assert.equal(
         (await request(`realms/${REALM}`)).data.displayName,
         'Unmanaged test realm',
