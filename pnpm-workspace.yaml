@@ -2,3 +2,13 @@ packages:
   - 'apps/*'
 
 strictPeerDependencies: true
+engineStrict: true
+# Next.js 16.4 supports ESLint 10; these plugins still declare ESLint <=9.
+peerDependencyRules:
+  allowedVersions:
+    'eslint-plugin-react>eslint': '10'
+    'eslint-plugin-jsx-a11y>eslint': '10'
+    'eslint-plugin-import>eslint': '10'
+# Native optional binaries are installed directly; no fallback download script.
+allowBuilds:
+  unrs-resolver: false

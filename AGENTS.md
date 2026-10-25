@@ -1,12 +1,14 @@
 # Innoview Platform — instrucciones permanentes para Codex
 
 ## Antes de trabajar
+
 - Leer `docs/PRODUCT.md`, `docs/ARCHITECTURE.md`, `docs/DATA_MODEL.md`, `docs/DECISIONS.md` y `docs/IMPLEMENTATION_PLAN.md` según la tarea.
 - Estas especificaciones son la fuente de verdad inicial. Ante ambigüedad, explicitar supuestos y proponer una decisión; no cambiar decisiones cerradas silenciosamente.
 - Comenzar identificando alcance, archivos afectados, riesgos y pruebas. Implementar incrementos pequeños y verificables.
 - No implementar todos los módulos del catálogo en el primer MVP.
 
 ## Reglas de arquitectura
+
 - Monorepo pnpm Workspaces + Turborepo; NestJS, Next.js, TypeScript, PostgreSQL, Docker.
 - Core separado de paquetes reutilizables y módulos de negocio.
 - Monolito modular para Core y módulos nativos iniciales; aplicaciones externas mediante APIs/adaptadores.
@@ -21,6 +23,7 @@
 - Branding configurable por tenant/organización y white-label sin forks del Core.
 
 ## Seguridad y transacciones
+
 - Nunca confiar en tenant, empresa o permisos declarados solo por el frontend.
 - Datos tenant-owned con tenant_id, integridad referencial y Row-Level Security en PostgreSQL compartido; pruebas de aislamiento.
 - Roles de aplicación sin BYPASSRLS ni privilegios de migración.
@@ -31,6 +34,7 @@
 - No incorporar secretos en código ni en documentación.
 
 ## Calidad y ejecución
+
 - Escribir migraciones versionadas, pruebas unitarias de reglas y pruebas de integración con PostgreSQL real para RLS/UoW.
 - Validar entradas/salidas y contratos, documentar APIs públicas y versionar eventos.
 - No modificar decisiones arquitectónicas sin registrar el cambio en `docs/DECISIONS.md`.
@@ -38,4 +42,5 @@
 - No ejecutar despliegues de producción, migraciones destructivas ni crear infraestructura facturable sin aprobación explícita.
 
 ## Primer objetivo
+
 Implementar el Foundation MVP en orden: monorepo y CI, OIDC, organizaciones, membresías, RBAC por alcance, RLS, portal mínimo, pruebas de aislamiento y módulo nativo de prueba.

@@ -8,3 +8,13 @@ dist/
 !.env.example
 coverage/
 *.log
+out/
+build/
+.cache/
+*.pem
+*.key
+*.p12
+*.pfx
+.DS_Store
+Thumbs.db
+next-env.d.ts
