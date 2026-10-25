@@ -1,0 +1,17 @@
+{
+  "name": "innoview-platform",
+  "version": "0.0.0",
+  "private": true,
+  "packageManager": "pnpm@11.25.0",
+  "engines": { "node": "^22.15.0 || ^24.11.0" },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck"
+  },
+  "devDependencies": {
+    "turbo": "2.11.10",
+    "typescript": "6.0.3",
+    "@types/node": "22.20.5"
+  }
+}
