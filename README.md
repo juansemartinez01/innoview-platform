@@ -1,12 +1,84 @@
 # Innoview Platform
 
-Foundation MVP, incrementos 0.1 a 0.5. Fuente de verdad: AGENTS.md y docs/.
+Fase 0 (Foundation técnico), incrementos 0.1 a 0.6 verificados. Cierre pendiente de revisión del equipo. Fuente de verdad: AGENTS.md y docs/. El Foundation MVP de producto continúa en las fases siguientes; todavía no hay identidad de aplicaciones, organizaciones ni aislamiento multi-tenant.
 
 ## Requisitos
 
 Node.js 24 LTS, fijado en **24.22.1** para desarrollo y CI, y pnpm **11.25.0**. `.node-version` configura GitHub Actions y gestores de versiones compatibles; `devEngines.runtime` permite a pnpm descargar y utilizar esa versión para los comandos del proyecto, sin cambiar la instalación global. `engines` y `engineStrict` restringen la compatibilidad a Node 24. `pnpm exec node --version` debe devolver `v24.22.1`. Node 22 ya no es el entorno de desarrollo admitido.
 
-## Comandos desde la raíz
+En una computadora nueva con Windows:
+
+1. Instalar [Git](https://git-scm.com/downloads/win), [Node.js 24.22.1](https://nodejs.org/en/download) y [Docker Desktop](https://docs.docker.com/desktop/setup/install/windows-install/). Configurar el backend Linux (por ejemplo WSL 2), iniciar Docker Desktop y abrir PowerShell. No hace falta instalar PostgreSQL, Java ni Keycloak en el host.
+2. Instalar pnpm con `npm install --global pnpm@11.25.0` si aún no está disponible. No actualizar dependencias ni regenerar el lockfile para comenzar.
+3. Comprobar `git --version`, `node --version`, `pnpm --version`, `docker version` y `docker compose version`. Docker debe mostrar servidor Linux y Compose v2 con soporte para `up --wait` (verificado con 2.34.0).
+
+## Inicio desde un clon nuevo
+
+Ejecutar los bloques en orden. El último bloque de desarrollo queda abierto; usar otra terminal para consultas.
+
+```powershell
+git clone https://github.com/juansemartinez01/innoview-platform.git
+Set-Location innoview-platform
+pnpm install --frozen-lockfile
+pnpm exec node --version
+```
+
+Crear `.env` con seis contraseñas aleatorias e independientes, sin imprimirlas. Este comando **falla si el archivo ya existe**; para un entorno existente conservarlo y agregar únicamente las variables faltantes de `.env.example`.
+
+```powershell
+@'
+import { readFileSync, writeFileSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
+const text = readFileSync('.env.example', 'utf8').replace(
+  /^([A-Z_]+PASSWORD)=\r?$/gm,
+  (_, key) => key + '=' + randomBytes(24).toString('hex'),
+);
+writeFileSync('.env', text, { flag: 'wx' });
+console.log('.env creado; credenciales locales omitidas.');
+'@ | node --input-type=module
+```
+
+El ejemplo define host, puertos, base, usuarios y TLS local. No se necesitan otras variables ni copiar credenciales del equipo Innoview. Para iniciar la infraestructura y preparar la base:
+
+```powershell
+docker compose config --quiet
+docker compose up -d --wait --wait-timeout 240
+docker compose ps
+pnpm db:provision
+pnpm db:show
+pnpm db:run
+pnpm db:show
+```
+
+Resultado esperado: tres servicios `healthy` y `FoundationProbe1792886400000` marcada `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`; todavía no inicia sesión en las aplicaciones.
+
+Validar calidad y pruebas en su PostgreSQL temporal independiente:
+
+```powershell
+docker compose -f compose.test.yaml up -d --wait --wait-timeout 120
+pnpm lint
+pnpm format:check
+pnpm typecheck
+pnpm test
+pnpm build
+docker compose -f compose.test.yaml down
+pnpm dev
+```
+
+Resultado esperado: controles con código 0, pruebas sin fallos, tres builds y las tres aplicaciones disponibles en 3000/3001/3002. Después de arrancar, comprobar desde otra terminal:
+
+```powershell
+(Invoke-WebRequest 'http://127.0.0.1:3000').StatusCode
+(Invoke-WebRequest 'http://127.0.0.1:3001').StatusCode
+(Invoke-WebRequest 'http://127.0.0.1:3002').StatusCode
+(Invoke-WebRequest 'http://127.0.0.1:8080/realms/master/.well-known/openid-configuration').StatusCode
+```
+
+Las cuatro respuestas deben ser 200. Detener `pnpm dev` con Ctrl+C antes de iniciar los servidores del build. Las secciones siguientes explican operación, migraciones y reinicios sin pérdida de datos.
+
+Si hay conflictos de puertos, modificar PLATFORM_POSTGRES_PORT y DB_PORT juntos, KEYCLOAK_HTTP_PORT y TEST_DB_PORT en `.env`; usar los nuevos puertos en las consultas HTTP. Los puertos de aplicaciones son 3000/3001/3002 y deben estar libres. Para una segunda copia independiente usar `docker compose -p nombre-distinto ...` y `docker compose -p nombre-distinto-test -f compose.test.yaml ...` en **todos** sus comandos, con puertos distintos. Un clon nuevo no debe reutilizar accidentalmente los volúmenes de otra copia con contraseñas nuevas.
+
+## Referencia de comandos desde la raíz
 
 ```powershell
 pnpm install --frozen-lockfile
@@ -38,7 +110,7 @@ Requiere Docker Desktop iniciado, contenedores Linux y Docker Compose v2. Se ver
 if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 ```
 
-Completar en `.env` tres contraseñas aleatorias e independientes: `PLATFORM_POSTGRES_PASSWORD`, `IDENTITY_POSTGRES_PASSWORD` y `KEYCLOAK_ADMIN_PASSWORD`. No usar credenciales de producción. El ejemplo no contiene contraseñas funcionales y Compose exige valores no vacíos. `.env` está excluido de Git; no compartir su contenido ni la salida de `docker compose config` sin `--quiet`, que incluye los valores interpolados.
+El generador del inicio ya completa las contraseñas. Si se configura manualmente, completar en `.env` `PLATFORM_POSTGRES_PASSWORD`, `IDENTITY_POSTGRES_PASSWORD` y `KEYCLOAK_ADMIN_PASSWORD` con valores aleatorios independientes, además de las credenciales de persistencia y pruebas descritas abajo. No usar credenciales de producción. El ejemplo no contiene contraseñas funcionales y Compose exige valores no vacíos. `.env` está excluido de Git; no compartir su contenido ni la salida de `docker compose config` sin `--quiet`, que incluye los valores interpolados.
 
 ```powershell
 docker compose config --quiet
@@ -142,4 +214,4 @@ Node test runner ejecuta pruebas reales: conexiones, credenciales inválidas, mi
 
 [GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL temporal con contraseña aleatoria en cada run y lo detiene siempre. No depende de PostgreSQL local ni de secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
 
-Versiones, fuentes, privilegios y riesgos: docs/FOUNDATION.md. Próximo incremento: **0.6, verificación integral y documentación final de Fase 0**, después de revisar 0.5.
+Informe de cierre, evidencia, estructura y riesgos: [docs/FOUNDATION.md](docs/FOUNDATION.md). Análisis y orden propuesto para Identity, Organizations, Memberships y OrganizationalUnit: [docs/PHASE_1_PREPARATION.md](docs/PHASE_1_PREPARATION.md). **Fase 1 no iniciada; requiere revisar el cierre de 0.6.**

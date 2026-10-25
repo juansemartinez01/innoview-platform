@@ -1,6 +1,103 @@
-# Foundation — acuerdos, monorepo, calidad, infraestructura y persistencia (0.1–0.5)
+# Foundation — cierre técnico de Fase 0 (0.1–0.6)
 
 Fecha de selección: 2026-10-24. No se cambia el stack acordado.
+
+## Estado de cierre — 2026-10-25
+
+Criterios técnicos de Fase 0 verificados; 0.6 queda presentado para revisión del usuario. 0.1–0.5 ya aprobados. Este cierre cubre herramientas, infraestructura local y persistencia técnica; el Foundation MVP de producto aún requiere las fases de identidad, organizaciones, autorización, RLS y extensibilidad. Fase 1 no iniciada.
+
+| Incremento                   | Estado y evidencia                                                                                                    |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| 0.1 — Acuerdos mínimos       | Aprobado. Tenant/Deployment, TypeORM y riesgos documentados; ADR-023/024                                              |
+| 0.2 — Monorepo               | Aprobado. pnpm/Turbo y tres aplicaciones; commit inicial 764d9b3                                                      |
+| 0.3 — Calidad y CI           | Aprobado. Node 24, ESLint/Prettier y Actions; commit 955ff64                                                          |
+| 0.4 — Infraestructura Docker | Aprobado. PostgreSQL Platform/Identity y Keycloak separados; commit ad5dee9                                           |
+| 0.5 — Persistencia           | Aprobado. Roles, DataSource separados, migración técnica y PostgreSQL real; commit eee7307                            |
+| 0.6 — Verificación y cierre  | Verificado localmente y presentado para revisión. Commit y ejecución de CI asociados se entregan con el informe final |
+
+### Recorrido integral desde clon limpio
+
+Se clonó desde GitHub el commit eee7307 en un directorio temporal sin .env, node_modules ni artefactos. Se usaron contraseñas nuevas, proyectos Compose innoview-foundation-close/innoview-foundation-close-test y puertos 55434/55435/18080 para evitar los volúmenes y credenciales del proyecto habitual. Git/Docker/pnpm ya estaban instalados y el store pnpm tenía caché; esto verifica un clon limpio, no una reinstalación del sistema operativo.
+
+| Comprobación                                 | Resultado                                                                                                                                                     |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Instalación congelada del clon               | Correcta; runtime Node 24.22.1, sin modificar lockfile                                                                                                        |
+| Compose y tres servicios nuevos              | Configuración válida, PostgreSQL Platform/Identity y Keycloak healthy                                                                                         |
+| Aprovisionamiento en base nueva y repetición | Correcto, sin borrado de datos                                                                                                                                |
+| Migraciones                                  | show pendiente → run aplicado → show [X]; repetir run no encontró pendientes                                                                                  |
+| Generación y creación                        | generate --check sin diferencias; create produjo un archivo técnico temporal fuera del directorio activo de migraciones, sin aplicarlo                        |
+| pnpm dev desde raíz                          | Tres aplicaciones HTTP 200, incluyendo inicio correcto de NestJS por Turborepo                                                                                |
+| Build y ejecución compilada                  | Tres builds correctos y tres aplicaciones HTTP 200                                                                                                            |
+| API sin credenciales administrativas         | Ambos modos arrancaron con .env reducido a DB_HOST/PORT/NAME/SSL/APP_USER/APP_PASSWORD; no necesitó bootstrap, migrador ni Keycloak                           |
+| Identidad de conexión                        | Consulta con las credenciales runtime confirmó current_user=innoview_app; NestJS usa el mismo provider validado                                               |
+| Roles/errores negativos                      | API rechazó contraseña incorrecta y rol bootstrap; CLI rechazó rol bootstrap y revert sobre desarrollo, todos con salida no cero                              |
+| Contraseñas en logs                          | No aparecieron en logs capturados de arranque normal ni errores negativos; no se imprime configuración interpolada                                            |
+| Persistencia tras restart                    | Dato técnico en Platform, historial migrador e ID realm master conservaron sus valores; Keycloak volvió a HTTP 200. Dato técnico de comprobación retirado     |
+| Pruebas reales                               | 11 subpruebas más prueba principal: 12 resultados satisfactorios, cero fallos/omitidos; base/roles únicos creados y eliminados dentro del PostgreSQL temporal |
+| Calidad                                      | lint, format:check, typecheck y build satisfactorios; sin suites ficticias                                                                                    |
+| Limpieza                                     | Procesos de comprobación detenidos; proyectos de comprobación detenidos sin eliminar volúmenes. Servicios habituales preservados                              |
+
+La evidencia de CI final corresponde al commit de cierre publicado: [workflow CI](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml). La entrega incluye el enlace inmutable al run verificado. Las pruebas automáticas de CI usan su PostgreSQL temporal; la comprobación conjunta de las tres aplicaciones y Keycloak se realizó localmente en Windows.
+
+### Problemas encontrados y correcciones de cierre
+
+- README tenía comandos correctos pero dispersos y sin un recorrido completo para una computadora nueva. Se agregaron requisitos, enlaces oficiales, clone/install, generación de .env que falla si ya existe, orden de servicios/roles/migraciones, pruebas y comprobaciones HTTP.
+- Faltaban instrucciones explícitas para dos clones en el mismo equipo. Se documentaron proyectos Compose y puertos distintos, evitando reutilizar volúmenes con contraseñas nuevas. No se eliminaron volúmenes para resolver conflictos.
+- La documentación conservaba frases históricas de etapas previas que podían interpretarse como estado vigente. Se distingue el cierre actual de la evidencia histórica y se actualiza IMPLEMENTATION_PLAN.
+- No se encontraron problemas críticos de configuración que requieran cambiar dependencias, código de aplicaciones, seguridad de roles o decisiones arquitectónicas en 0.6. No se modifica DECISIONS.md.
+
+### Riesgos y trabajo abierto
+
+- OIDC de aplicaciones, entidades empresariales, membresías, RBAC y RLS no están implementados. No exponer datos de clientes hasta que existan sus controles backend y pruebas correspondientes; la respuesta actual de API es técnica.
+- Las pruebas de privilegios técnicos no acreditan aislamiento multi-tenant, contexto transaccional ni UoW. Estas verificaciones se incorporarán al implementar esos mecanismos.
+- Local usa HTTP/start-dev y propietarios bootstrap administrativos. No es configuración de producción; faltan TLS, políticas de conexión, gestión/rotación de secretos, backups, observabilidad operativa y decisiones de hosting/HA.
+- Las ACL se administran en Platform, no en otras bases del clúster; producción requiere restringir también conexiones y provisión. El historial está protegido de app, pero el migrador puede modificar sus objetos: acceso y revisión de SQL siguen siendo controles necesarios.
+- Revert tiene guardas de nombre/entorno y validación del migrador; no reemplaza una autorización de producción ni convierte una base con datos en descartable. Las pruebas solo revierten bases que ellas mismas acaban de crear.
+- Nuevos esquemas de Core requieren extender explícitamente permisos, registro de entidades/migraciones y validación de propietario del migrador. No relajar esas comprobaciones para hacer funcionar una migración futura.
+- Mantener bajo revisión las excepciones acotadas de peers ESLint 10 y las versiones fijadas. Los avisos de desarrollo/deprecación del upstream Keycloak no impiden su salud y no se silencian habilitando features extra.
+
+No quedan bloqueos críticos para comenzar a diseñar Platform Core, dentro de estos límites. El análisis de dependencias y el siguiente incremento propuesto están en [PHASE_1_PREPARATION.md](PHASE_1_PREPARATION.md); no hay implementación de Fase 1.
+
+### Estructura al cierre
+
+```text
+innoview-platform/
+├── .github/workflows/ci.yml
+├── apps/
+│   ├── api/
+│   │   ├── src/
+│   │   │   ├── main.ts, app.module.ts, app.controller.ts
+│   │   │   └── persistence/
+│   │   │       ├── connection.config.ts, data-sources.ts
+│   │   │       ├── migration-data-source.ts, migration.cli.ts
+│   │   │       ├── persistence.module.ts, persistence.spec.ts
+│   │   │       ├── provision.ts, provision.cli.ts
+│   │   │       └── migrations/1792886400000-FoundationProbe.ts
+│   │   ├── package.json, nest-cli.json
+│   │   └── tsconfig.json, tsconfig.build.json, tsconfig.test.json
+│   ├── portal/
+│   │   ├── app/layout.tsx, app/page.tsx
+│   │   └── AGENTS.md, package.json, tsconfig.json
+│   └── control-center/
+│       ├── app/layout.tsx, app/page.tsx
+│       └── AGENTS.md, package.json, tsconfig.json
+├── docs/
+│   ├── PRODUCT.md, ARCHITECTURE.md, DATA_MODEL.md, DECISIONS.md
+│   ├── FOUNDATION.md, IMPLEMENTATION_PLAN.md
+│   └── PHASE_1_PREPARATION.md
+├── compose.yaml, compose.test.yaml
+├── .env.example, .gitignore, .gitattributes, .node-version
+├── .prettierrc.json, .prettierignore, eslint.config.mjs
+├── package.json, pnpm-lock.yaml, pnpm-workspace.yaml
+├── tsconfig.base.json, turbo.json
+└── AGENTS.md, README.md
+```
+
+Sin paquetes compartidos vacíos ni worker implementado. .env, node_modules, dist, dist-test, .next, next-env.d.ts y cachés son locales/ignorados. La estructura anterior agrupa nombres de archivos para lectura; las carpetas futuras de arquitectura todavía no existen.
+
+## Referencia e historial de incrementos
+
+Las secciones siguientes conservan decisiones técnicas y evidencia de cada incremento. Las frases de alcance fechadas describen el estado en ese momento; el estado vigente es el cierre anterior.
 
 ## Versiones fijadas
 
@@ -48,7 +145,7 @@ Persistencia en 0.5: TypeORM 1.1.2, pg 8.23.1 y @types/pg 8.23.1, versiones exac
 
 Los riesgos de autorización y aislamiento están en DECISIONS.md. La existencia del Control Center no concede privilegios ni representa una autorización implementada. No hay recursos tenant-owned todavía.
 
-Repositorio publicado en GitHub, CI en 0.3, infraestructura local en 0.4 y persistencia en 0.5. Pendientes: cierre de Fase 0 en 0.6, librería de sesión/OIDC y bootstrap de organizaciones en Fase 1. No se configuran despliegues ni infraestructura facturable.
+Repositorio publicado en GitHub, CI en 0.3, infraestructura local en 0.4, persistencia en 0.5 y verificación integral en 0.6. Pendientes: revisión del cierre, librería de sesión/OIDC y bootstrap de organizaciones en Fase 1. No se configuran despliegues ni infraestructura facturable.
 
 ## Incremento 0.5 — persistencia técnica y privilegios
 
@@ -154,7 +251,7 @@ Las pruebas cubren conexión, credenciales inválidas, flags y membresías, prop
 - Prettier aplica comillas simples, trailing commas y LF. Ignora el lockfile, next-env.d.ts y bloques AGENTS.md regenerados por Next.js, además de los patrones de .gitignore. Reformatear documentos no cambia decisiones arquitectónicas.
 - .gitignore cubre dependencias, compilados, cachés, cobertura, logs, .env y claves/certificados privados habituales. Los ejemplos .env.example pueden versionarse solo con valores ficticios. El ignore no sustituye revisión antes de cada commit.
 - CI: push, pull_request y workflow_dispatch en Ubuntu; permisos contents: read, sin credenciales persistidas por checkout, timeout y cancelación de runs anteriores. Acciones checkout v7, setup-node v7 y pnpm/action-setup v6 fijadas por SHA. No hay caché remota ni despliegues.
-- Pipeline: instalación congelada → lint → formato → tipos → scripts de tests existentes → build. `pnpm test` usa `pnpm -r --if-present test`: no hay suites ni cobertura actualmente. La primera suite real se integra con su script test no interactivo; no se usa passWithNoTests ni tests ficticios.
+- Pipeline original de 0.3: instalación congelada → lint → formato → tipos → scripts de tests existentes → build. Al cerrar 0.3 no había suites; desde 0.5 `pnpm test` ejecuta integración real con PostgreSQL temporal. No se usa passWithNoTests ni tests ficticios.
 - Estado de cada commit: [GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml). La aceptación completa de Fase 0 continúa pendiente de 0.4–0.6.
 
 ### Validación local de 0.3 — 2026-10-24

@@ -15,12 +15,12 @@ Desarrollo por incrementos verticales con pruebas, no implementación simultáne
 
 - [x] 0.1 — Acuerdos mínimos: ADR-023/024, versiones, comandos, estrategia de migraciones y riesgos en FOUNDATION.md y DECISIONS.md.
 - [x] 0.2 — Inicialización: Git local, tres aplicaciones mínimas, lockfile, build/tipos y comprobaciones HTTP en desarrollo y tras build.
-- [x] 0.3 — Calidad y CI: lint, formato, política común de TypeScript y workflow. 0.1/0.2 aprobados por el usuario; resultados y política en FOUNDATION.md. Validar 0.3 antes de avanzar.
+- [x] 0.3 — Calidad y CI: lint, formato, política común de TypeScript y workflow. Aprobado por el usuario; resultados y política en FOUNDATION.md.
 - [x] 0.4 — Entorno Docker PostgreSQL/Keycloak y bases separadas. Salud, conexiones y persistencia verificadas en Docker Desktop/PowerShell; evidencia en FOUNDATION.md. Aprobado por el usuario antes de 0.5.
-- [x] 0.5 — TypeORM/pg, roles, migraciones y PostgreSQL real. Evidencia en FOUNDATION.md; pendiente revisión antes de 0.6.
-- [ ] 0.6 — Verificación integral del stack y documentación final.
+- [x] 0.5 — TypeORM/pg, roles, migraciones y PostgreSQL real. Aprobado por el usuario; evidencia en FOUNDATION.md.
+- [x] 0.6 — Verificación integral desde clon limpio, arranque de aplicaciones, persistencia y separación de credenciales, controles de calidad y documentación final. Cierre presentado para revisión; no iniciar Fase 1 sin revisión del usuario.
 
-0.1 y 0.2 verificados el 2026-10-24; evidencia en FOUNDATION.md. La aceptación completa de Fase 0 sigue pendiente; build verde no equivale a CI configurada.
+0.1–0.5 aprobados. Criterios técnicos de Fase 0 verificados en 0.6 el 2026-10-25; evidencia y límites en FOUNDATION.md. La aprobación del cierre está pendiente. Preparación de Identity, Organizations, Memberships y OrganizationalUnit en PHASE_1_PREPARATION.md, exclusivamente como análisis; las tareas de Fase 1 permanecen sin implementar.
 
 ### Fase 1 — Identidad y organizaciones
 
