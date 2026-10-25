@@ -1,6 +1,6 @@
 # Innoview Platform
 
-Fase 0 cerrada e incrementos 1.1/1.2 aprobados. Incremento 1.3: identidad local y retorno SSO en servidor implementados, pendiente revisión. Fuente de verdad: AGENTS.md y docs/. Sin organizaciones, autorización empresarial ni aislamiento multi-tenant.
+Fase 0 cerrada e incrementos 1.1–1.3 aprobados. Incremento 1.4: Organizations interno implementado, pendiente revisión. Fuente de verdad: AGENTS.md y docs/. Sin endpoints organizacionales, membresías, autorización empresarial ni aislamiento RLS.
 
 ## Requisitos
 
@@ -52,7 +52,7 @@ pnpm oidc:provision
 pnpm oidc:check
 ```
 
-Resultado esperado: tres servicios `healthy` y las tres migraciones FoundationProbe/BffSessions/UserIdentity marcadas `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`. El login de aplicaciones usa cuentas del realm innoview, no administradores master.
+Resultado esperado: tres servicios `healthy` y las cuatro migraciones FoundationProbe/BffSessions/UserIdentity/Organizations marcadas `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`. El login de aplicaciones usa cuentas del realm innoview, no administradores master.
 
 Validar calidad y pruebas en PostgreSQL y Keycloak temporales independientes:
 
@@ -101,7 +101,30 @@ Las páginas permiten login/logout y muestran identidad técnica. GET /auth/me v
 
 ## Límites actuales
 
-identity-bff tiene dos consumidores Next.js reales; sin paquetes vacíos, módulos comerciales ni worker. TypeORM y PostgreSQL contienen objetos de Foundation, sesiones y UserIdentity local. Sin Tenant/Company/Branch/Membership, RLS ni UoW. Keycloak conserva cuentas y contraseñas empresariales; UserIdentity solo referencia issuer/sub con UUID propio.
+identity-bff tiene dos consumidores Next.js reales; sin paquetes vacíos, módulos comerciales ni worker. Organizations contiene Tenant/BusinessGroup/Company/Branch/OU con integridad transaccional, sin rutas públicas. Sin Membership, RBAC, RLS ni UoW genérico. Keycloak conserva cuentas y contraseñas empresariales; UserIdentity solo referencia issuer/sub con UUID propio. Integridad por tenant no equivale a autorización ni aislamiento de lectura.
+
+## Organizations interno — 1.4
+
+Sin variables o dependencias nuevas. En una instalación existente conservar `.env` y volúmenes:
+
+```powershell
+pnpm install --frozen-lockfile
+docker compose up -d --wait --wait-timeout 240
+pnpm db:provision
+pnpm db:run
+pnpm db:show
+pnpm db:generate src/persistence/migrations/OrganizationsCheck --check
+```
+
+Organizations1792929600000 es aditiva; crea cinco tablas en organizations, constraints/FK, funciones de integridad y metadata STORED privada de TypeORM. db:provision agrega el esquema y permisos mínimos, incluyendo reconciliación de grants por columna; repetirlo conserva los datos. No borrar volúmenes ni ejecutar revert sobre desarrollo.
+
+OrganizationsService ofrece solo createTenant (tenant + grupo + OU), createCompany, createBranch, getStructure y setStatus para consumidores internos. No hay controllers, endpoints, seeds ni comandos para dar de alta clientes reales. Autenticarse no crea tenants ni afiliaciones; conocer un UUID no habilita consultas HTTP organizacionales. El rol compartido aún puede leer estructuras de distintos tenants directamente: no presentar esta etapa como multi-tenant segura.
+
+Nombre/estado/fechas comunes están en OU; los registros tipados comparten UUID y guardan únicamente parentesco/datos específicos. Los padres se derivan, sin parent_id duplicado. Estado ACTIVE↔INACTIVE y ambos→ARCHIVED terminal, con ancestros activos para crear/reactivar. Relaciones, constraints y límites: DATA_MODEL.md, ARCHITECTURE.md y ADR-030. Tenant sigue siendo límite lógico; no hay administración de Deployment.
+
+Pruebas con `docker compose -f compose.test.yaml up -d --wait --wait-timeout 180` y `pnpm test`: estructuras sintéticas, cruces/tipos/ciclos/huérfanos, unicidad, rollback, concurrencia, estados, borrados, ACL y reversión/reaplicación descartable. También se verifica HTTP 404 en rutas Organizations aun con JWT válido y UUID de tenants existentes. No son pruebas de autorización/RLS.
+
+Advertencia conocida: la introspección de columnas STORED en TypeORM 1.1.2 usa consultas simultáneas en un QueryRunner y pg 8.23.1 emite una advertencia de deprecación. Se verificó con trace: procede de PostgresQueryRunner.loadTables/schemaBuilder.log, no de transacciones del servicio. Tests y generate --check pasan; no se oculta ni se actualizan dependencias para silenciarla. Revalidar antes de adoptar pg 9.
 
 ## Autenticación e identidad local — 1.3
 
@@ -222,13 +245,13 @@ pnpm dev
 
 `db:provision` es idempotente, transaccional y funciona sobre volúmenes ya inicializados. No borra bases ni datos. Crea roles administrados, esquemas y ACL; falla ante roles/esquemas ajenos o membresías inesperadas. Repetirlo reconcilia privilegios de los objetos administrados y actualiza las contraseñas de app/migrador a los valores locales. Ejecutarlo solo como mantenimiento local controlado. La API no aprovisiona, sincroniza ni ejecuta migraciones al arrancar.
 
-| Rol                  | Privilegios en la base Platform                                                                                                                                                                |
-| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| platform_local_admin | Bootstrap administrativo; solo aprovisionamiento local                                                                                                                                         |
-| innoview_migrator    | CONNECT y propietario de foundation/platform_meta/portal_sessions/control_sessions/identity y sus objetos; sin privilegios globales ni membresías                                              |
-| innoview_app         | CRUD en foundation y USAGE de secuencias; USAGE + SELECT/INSERT en identity, sin UPDATE/DELETE allí; sin propiedad, DDL, TEMP, TRUNCATE, SET ROLE migrador, historial ni acceso a sesiones BFF |
-| innoview_portal      | CONNECT, USAGE/CRUD solo en portal_sessions; sin DDL, propiedad, membresías ni acceso a sesiones de Control Center                                                                             |
-| innoview_control     | CONNECT, USAGE/CRUD solo en control_sessions; sin DDL, propiedad, membresías ni acceso a sesiones de Portal                                                                                    |
+| Rol                  | Privilegios en la base Platform                                                                                                                                                                                                                                        |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| platform_local_admin | Bootstrap administrativo; solo aprovisionamiento local                                                                                                                                                                                                                 |
+| innoview_migrator    | CONNECT y propietario de foundation/platform_meta/portal_sessions/control_sessions/identity/organizations y sus objetos; sin privilegios globales ni membresías                                                                                                        |
+| innoview_app         | CRUD en foundation y USAGE de secuencias; USAGE + SELECT/INSERT en identity, sin UPDATE/DELETE allí; Organizations SELECT/INSERT y UPDATE(status,updated_at) solo en Tenant/OU; sin DELETE, DDL, TEMP, TRUNCATE, SET ROLE migrador, historial ni acceso a sesiones BFF |
+| innoview_portal      | CONNECT, USAGE/CRUD solo en portal_sessions; sin DDL, propiedad, membresías ni acceso a sesiones de Control Center                                                                                                                                                     |
+| innoview_control     | CONNECT, USAGE/CRUD solo en control_sessions; sin DDL, propiedad, membresías ni acceso a sesiones de Portal                                                                                                                                                            |
 
 El historial TypeORM está en `platform_meta.migrations`; la tabla de demostración, en `foundation.persistence_probe`. Los defaults de tablas/secuencias se aplican a objetos futuros creados por el migrador en foundation. No se otorgan permisos genéricos a futuros módulos: cada esquema necesitará una política explícita. Los controles se aplican a la base administrada, no alteran ACL de otras bases del clúster ni reemplazan políticas de conexión de producción.
 
@@ -270,4 +293,4 @@ También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/
 
 [GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL/Keycloak temporales con contraseñas aleatorias y los detiene al terminar. No depende de servicios locales ni secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
 
-Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Próximos incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No avanzar a Organizations sin revisión de 1.3.**
+Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Próximos incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No avanzar a Memberships sin revisión de 1.4.**

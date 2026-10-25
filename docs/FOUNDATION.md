@@ -4,7 +4,7 @@ Fecha de selección: 2026-10-24. No se cambia el stack acordado.
 
 ## Estado de cierre — 2026-10-25
 
-Criterios técnicos verificados y Fase 0 oficialmente cerrada por el usuario tras revisar c069a9a y Actions. Este cierre cubre herramientas, infraestructura local y persistencia técnica. Fase 1: 1.1/1.2 aprobados; 1.3 integra UserIdentity local y retorno SSO servidor, pendiente revisión (OIDC.md, ADR-028/029). No hay organizaciones, afiliaciones empresariales ni RLS. La evidencia siguiente es el cierre histórico de Fase 0; verificaciones y privilegios actuales están en OIDC.md/README.
+Fase 0 oficialmente cerrada en c069a9a. 1.1–1.3 aprobados; 1.4 incorpora Organizations interno, pendiente revisión (ADR-030/DATA_MODEL.md). Sin membresías, autorización empresarial ni RLS. La evidencia siguiente es el cierre histórico de Foundation, no el estado actual de sus esquemas: privilegios y verificaciones recientes están en README, DATA_MODEL y OIDC.
 
 | Incremento                   | Estado y evidencia                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------ |

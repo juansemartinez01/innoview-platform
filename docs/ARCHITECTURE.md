@@ -11,7 +11,7 @@
 - Tenant: límite lógico de aislamiento de una organización cliente. Deployment: instancia de ejecución que puede alojar uno o varios tenants.
 - tenant_id y RLS aíslan tenants; la autorización del Core controla empresas y sucursales.
 - Keycloak central vía OpenID Connect (Authorization Code + PKCE) para autenticación. Core gestiona autorización.
-- Contrato de desarrollo OIDC en docs/OIDC.md, ADR-025/026: realm innoview, clientes separados, issuer canónico y aprovisionamiento/verificación. 1.2 integra BFF/JWT (ADR-027); packages/identity-bff tiene dos consumidores reales. 1.3 separa AuthenticationModule de IdentityModule y persiste UserIdentity en esquema identity (ADR-028); contrato OIDC v2 con retorno logout directo al servidor y migración explícita (ADR-029). Organizaciones y autorización empresarial siguen pendientes.
+- Contrato OIDC en docs/OIDC.md, ADR-025/026. 1.2 integra BFF/JWT (ADR-027); packages/identity-bff tiene dos consumidores reales. 1.3 separa AuthenticationModule/IdentityModule y persiste UserIdentity (ADR-028); logout servidor y contrato v2 (ADR-029). 1.4 incorpora OrganizationsModule y su esquema organizations (ADR-030), exclusivamente mediante servicios internos, sin controllers. Membresías, autorización empresarial y RLS siguen pendientes.
 
 ## Paquetes previstos
 
@@ -53,3 +53,27 @@ Portal/App Shell dinámico, UI Kit, SDK y temas white-label configurables. Para 
 ## Restricciones
 
 Nunca abrir datos cross-tenant por estar en un mismo grupo, ni dar acceso por mostrar navegación. APIs, trabajadores, caché y archivos deben aislar contextos. Privilegios de Innoview Control Center separados de admins clientes.
+
+## Organizations — 1.4
+
+Organizations es dueño de Tenant, BusinessGroup, Company, Branch y OrganizationalUnit, sin consultar tablas de Identity. OU y registros concretos comparten UUID; nombre/estado/fechas tienen una única fuente en Tenant/OU. Padres tipados en Company/Branch, sin relación recursiva duplicada. FK compuestas, discriminadores generados y constraints diferidas garantizan integridad al commit; no equivalen a autorización ni RLS. Detalle en DATA_MODEL.md y ADR-030.
+
+OrganizationsService exporta solo operaciones internas createTenant (incluye grupo/OU), createCompany, createBranch, getStructure y setStatus. Las escrituras son transaccionales, bloquean primero el tenant y no llaman servicios externos; las lecturas usan snapshot consistente. No hay framework de UoW nuevo, seeds de clientes ni endpoints por UUID. Los futuros consumidores deberán aportar contexto validado por Memberships y políticas Core antes de exponer datos; hoy ni siquiera un JWT válido habilita rutas Organizations.
+
+```text
+apps/api/src/organizations/
+  organizations.module.ts
+  organizations.service.ts
+  organizations.types.ts
+  organizations.spec.ts
+  entities/
+    tenant.entity.ts
+    organizational-unit.entity.ts
+    business-group.entity.ts
+    company.entity.ts
+    branch.entity.ts
+    organization-record.ts
+    index.ts
+```
+
+La clase base OrganizationRecord solo comparte columnas entre sus dos consumidores reales (Tenant/OU); no es otro módulo ni paquete. No hay controllers. La migración aditiva vive junto a las migraciones Core existentes: Organizations1792929600000.

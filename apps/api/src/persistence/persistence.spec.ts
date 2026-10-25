@@ -10,6 +10,7 @@ import {
   initializeApplicationDataSource,
   validateMigratorConnection,
 } from './data-sources.js';
+import { verifyOrganizations } from '../organizations/organizations.spec.js';
 import { provisionDatabase } from './provision.js';
 
 function sqlState(error: unknown, code: string): boolean {
@@ -145,7 +146,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await t.test(
       'migrator applies the real migration and owns the technical table',
       async () => {
-        assert.equal((await migrator.runMigrations()).length, 3);
+        assert.equal((await migrator.runMigrations()).length, 4);
         assert.equal(await migrator.showMigrations(), false);
         const [owner] = await migrator.query<{ owner: string }[]>(
           "SELECT pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid='foundation.persistence_probe'::regclass",
@@ -436,10 +437,29 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
       },
     );
 
+    await verifyOrganizations(t, app, migrator, env);
+
     await t.test(
       'real migration reverts and reapplies only in this disposable database',
       async () => {
         assert.match(database, /^innoview_test_[a-f0-9]{32}$/);
+        const revertOrganizations = spawnSync(
+          process.execPath,
+          [
+            fileURLToPath(new URL('./migration.cli.js', import.meta.url)),
+            'revert',
+          ],
+          {
+            env: { ...process.env, ...env, DB_DISPOSABLE: 'true' },
+            encoding: 'utf8',
+            windowsHide: true,
+          },
+        );
+        assert.equal(revertOrganizations.status, 0, revertOrganizations.stderr);
+        await assert.rejects(
+          app.query('SELECT * FROM organizations.tenant'),
+          (error) => sqlState(error, '42P01'),
+        );
         const revert = spawnSync(
           process.execPath,
           [

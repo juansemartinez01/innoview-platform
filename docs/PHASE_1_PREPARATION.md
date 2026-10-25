@@ -2,7 +2,7 @@
 
 Fecha: 2026-10-25. Las ADR vigentes no cambian. Este documento propone contratos y orden de trabajo para revisión después de cerrar Fase 0; no autoriza implementación automática.
 
-Actualización 1.3: 1.1/1.2 aprobados; UserIdentity local y retorno SSO servidor implementados, pendientes de revisión (ADR-028/029, OIDC.md). Este documento conserva el análisis original; su numeración histórica queda sustituida por IMPLEMENTATION_PLAN.md: 1.2 runtime, 1.3 Identity local, 1.4 Organizations, 1.5 Memberships y 1.6 contexto. No hay organizaciones ni afiliaciones empresariales; no se avanza sin autorización.
+Actualización 1.4: 1.1–1.3 aprobados; Organizations interno implementado, pendiente revisión (ADR-030). Este análisis histórico conserva propuestas, no autoriza avanzar. IMPLEMENTATION_PLAN.md fija la secuencia actual: 1.4 estructura interna, 1.5 Memberships, 1.6 contexto, Fase 2 autorización/RLS. No hay afiliaciones ni endpoints organizacionales.
 
 ## Dependencias y responsabilidades
 

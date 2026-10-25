@@ -82,7 +82,7 @@ export async function provisionDatabase(
     if (databaseOwner.rowCount)
       throw new Error('Migrator must not own databases');
     const outsideSchemas = await client.query(
-      "SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions','identity')",
+      "SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions','identity','organizations')",
       [migrator.user],
     );
     if (outsideSchemas.rowCount)
@@ -102,6 +102,7 @@ export async function provisionDatabase(
       'portal_sessions',
       'control_sessions',
       'identity',
+      'organizations',
     ]) {
       const owner = await client.query<{ owner: string }>(
         'SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname=$1',
@@ -169,6 +170,35 @@ export async function provisionDatabase(
     await client.query(
       `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA identity GRANT SELECT, INSERT ON TABLES TO ${q(app.user)}`,
     );
+    // Table REVOKE does not remove column ACLs. Reconcile all managed
+    // organization columns too, before granting the exact status-only updates.
+    const columns = await client.query<{
+      table_name: string;
+      columns: string[];
+    }>(
+      "SELECT c.relname AS table_name,array_agg(a.attname::text ORDER BY a.attnum) AS columns FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid WHERE n.nspname='organizations' AND c.relkind='r' AND a.attnum>0 AND NOT a.attisdropped GROUP BY c.relname",
+    );
+    for (const row of columns.rows)
+      await client.query(
+        `REVOKE ALL (${row.columns.map(q).join(',')}) ON TABLE organizations.${q(row.table_name)} FROM PUBLIC, ${runtimeNames}`,
+      );
+    await client.query(`GRANT USAGE ON SCHEMA organizations TO ${q(app.user)}`);
+    await client.query(
+      `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA organizations TO ${q(app.user)}`,
+    );
+    await client.query(
+      `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA organizations GRANT SELECT, INSERT ON TABLES TO ${q(app.user)}`,
+    );
+    for (const table of ['tenant', 'organizational_unit']) {
+      const found = await client.query<{ exists: boolean }>(
+        'SELECT to_regclass($1) IS NOT NULL AS exists',
+        [`organizations.${table}`],
+      );
+      if (found.rows[0]?.exists)
+        await client.query(
+          `GRANT UPDATE(status,updated_at) ON organizations.${q(table)} TO ${q(app.user)}`,
+        );
+    }
     await client.query('COMMIT');
   } catch {
     // Never emit PostgreSQL errors: DDL errors may contain password literals.

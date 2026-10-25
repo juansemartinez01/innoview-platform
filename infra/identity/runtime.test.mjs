@@ -595,6 +595,14 @@ await test(
             ).status,
             401,
           );
+          assert.equal(
+            (
+              await migrator.query(
+                'SELECT count(*)::int AS count FROM organizations.tenant',
+              )
+            )[0].count,
+            0,
+          );
           const after = (
             await migrator.query('SELECT * FROM identity.user_identity')
           )[0];
@@ -603,12 +611,57 @@ await test(
             "SELECT table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') AND table_type='BASE TABLE'",
           );
           assert.deepEqual(tables.map((row) => row.table_name).sort(), [
+            'branch',
+            'business_group',
+            'company',
             'migrations',
+            'organizational_unit',
             'persistence_probe',
             'sessions',
             'sessions',
+            'tenant',
+            'typeorm_metadata',
             'user_identity',
           ]);
+        },
+      );
+      await t.test(
+        'authenticated callers cannot expose Organizations through guessed UUID routes',
+        async () => {
+          const { OrganizationsService } =
+            await import('../../apps/api/dist/organizations/organizations.service.js');
+          const source = createDataSource('app', env);
+          await source.initialize();
+          try {
+            const service = new OrganizationsService(source);
+            for (const label of ['Route fixture A', 'Route fixture B']) {
+              const structure = await service.createTenant(
+                label,
+                `${label} group`,
+              );
+              for (const path of [
+                '/organizations',
+                '/organizations/tenants',
+                `/organizations/tenants/${structure.tenant.id}`,
+                `/tenants/${structure.tenant.id}`,
+              ]) {
+                for (const token of [undefined, portalData.access]) {
+                  const response = await fetch(
+                    `${env.AUTH_API_ORIGIN}${path}`,
+                    {
+                      headers: token
+                        ? { authorization: `Bearer ${token}` }
+                        : {},
+                    },
+                  );
+                  assert.equal(response.status, 404);
+                  assert.ok(!(await response.text()).includes(label));
+                }
+              }
+            }
+          } finally {
+            await source.destroy();
+          }
         },
       );
       await t.test(

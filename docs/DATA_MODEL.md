@@ -10,6 +10,34 @@
 - OrganizationalUnit: nodo tipado GROUP/COMPANY/BRANCH, tenant_id, padre válido y referencia al registro específico, usado para asignar alcances.
 - Jerarquía válida solo GROUP → COMPANY → BRANCH; impedir ciclos y referencias entre tenants.
 
+### Concreción 1.4 — ADR-030
+
+Implementado en 1.4, pendiente revisión: OrganizationalUnit guarda nombre/estado/fechas y cada BusinessGroup/Company/Branch comparte su UUID con una sola OU del tipo correcto. La pertenencia estructural reside únicamente en Company.business_group_id y Branch.company_id; el padre de OU se deriva al consultar. No se crea una columna parent_id independiente que pueda quedar desincronizada. Tablas del módulo: organizations.tenant, organizational_unit, business_group, company y branch.
+
+Cada registro salvo Tenant lleva tenant_id. OU tiene PK UUID y UNIQUE(tenant_id,id) disponible para futuras referencias por alcance, además de UNIQUE(tenant_id,id,type) para sus subtipos. BusinessGroup/Company/Branch tienen PK(tenant_id,id) y unit_type GENERATED ALWAYS STORED constante GROUP/COMPANY/BRANCH. FK compuestas enlazan cada subtipo a su OU y cada empresa/sucursal a su padre del mismo tenant. UNIQUE(tenant_id) en BusinessGroup impone el máximo de un grupo; triggers de constraint diferidos exigen al commit exactamente uno y ninguna OU huérfana. La estructura acíclica por tipos sustituye una relación recursiva libre. UUID, pertenencia y relaciones son inmutables; RESTRICT y ausencia de DELETE runtime protegen dependencias.
+
+Estado propio ACTIVE/INACTIVE/ARCHIVED en Tenant y OU. ACTIVE es inicial; ACTIVE↔INACTIVE, ambos→ARCHIVED y sin salida de ARCHIVED. Crear/reactivar requiere ancestros activos; desactivar un padre no copia estados a hijos. La disponibilidad efectiva futura considera todos los ancestros y permisos, no solo el estado propio. No se crean estados/roles derivados ni afiliaciones por esta jerarquía. Un cambio real de estado actualiza updated_at; repetir el mismo estado conserva la fecha.
+
+| Entidad            | Campos propios                                                        | Referencias/estado                                                          |
+| ------------------ | --------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| Tenant             | id UUID, name, status, created_at, updated_at                         | No tiene tenant_id redundante ni Deployment; exactamente un grupo al commit |
+| OrganizationalUnit | id UUID, tenant_id, type, name, status, created_at, updated_at        | FK Tenant; sin parent_id editable                                           |
+| BusinessGroup      | tenant_id, id, unit_type generado                                     | FK OU GROUP; sin padre organizacional                                       |
+| Company            | tenant_id, id, unit_type generado, business_group_id, tax_id opcional | FK OU COMPANY y BusinessGroup; nombre/estado en su OU                       |
+| Branch             | tenant_id, id, unit_type generado, company_id                         | FK OU BRANCH y Company; nombre/estado en su OU                              |
+
+Los nombres no son identificadores únicos. tax_id es opcional y opaco; todavía no hay política fiscal, normalización por país ni unicidad de CUIT/NIF. Los identificadores de referencia son UUID y claves compuestas, no nombres o documentos fiscales. No hay profile de Identity, user_id, Membership ni relaciones privadas entre módulos.
+
+La migración Organizations1792929600000 crea cinco tablas, índices de padres y tres funciones SECURITY INVOKER con search_path fijo: guard_lifecycle, guard_typed_parent y assert_complete. Las comprobaciones diferidas son por registro/clave indexada, sin escanear árboles completos. Los servicios bloquean primero el tenant para serializar escrituras; getStructure usa REPEATABLE READ. Operaciones con SQL directo que violen la estructura tampoco pueden confirmar. No se permiten movimientos de nodos o eliminación desde runtime.
+
+El esquema vacío se aprovisiona mediante bootstrap, conservando la política Foundation sin CREATE global para el migrador. Las expresiones STORED se registran de forma versionada en platform_meta.typeorm_metadata para que TypeORM no proponga reconstruirlas. Esa metadata y las migraciones no son accesibles por API. API: USAGE, SELECT/INSERT y UPDATE(status,updated_at) únicamente en Tenant/OU, sin privilegios generales de UPDATE/DELETE/DDL. El aprovisionamiento repetido elimina también grants por columna ajenos a esta política. BFF no puede leer organizations.
+
+No hay endpoints Organizations ni aislamiento RLS en 1.4. Los filtros tenant de TypeORM son contratos internos y no una barrera de autorización: el rol compartido todavía puede leer varios tenants. Fase 2 deberá validar membresía/alcance, establecer contexto transaccional y probar RLS con estas constraints, funciones y rol real, incluyendo bootstrap. No reutilizar estos métodos como endpoints abiertos por UUID.
+
+Verificación local 1.4: 22 resultados PostgreSQL (incluyen nueve subpruebas Organizations) y 26 de contrato OIDC/runtime: 48 resultados del runner, incluyendo pruebas principales agrupadoras. Creación de dos tenants, grupo único, unidades compartidas, asociaciones cruzadas/tipos/ciclos/huérfanos rechazados, rollback diferido, seis escritores concurrentes, estados, RESTRICT y privilegios efectivos. El aprovisionamiento elimina un grant UPDATE(name) agregado por la prueba en su base descartable. Reversión de las cuatro migraciones y reaplicación exclusivamente descartables; show/run repetidos y alineación metadata/entidades comprobados. Regresión login/identity/refresh/logout y HTTP 404 para rutas organizacionales con tokens reales. No prueba RLS ni autorización.
+
+La migración local aditiva fue aplicada y consultada, y generate --check no produjo cambios. No hay seeds ni filas de clientes reales. TypeORM 1.1.2/pg 8.23.1 emiten una advertencia de deprecación al introspectar expresiones STORED en schemaBuilder.log; trace identifica consultas concurrentes internas del driver. No bloquea pruebas/generación y no se suprime: revisar compatibilidad antes de pg 9. Versiones/dependencias de Foundation conservadas.
+
 ## Identity
 
 - Keycloak conserva cuentas, credenciales, MFA y sesiones del IdP.
