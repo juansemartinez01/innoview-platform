@@ -11,6 +11,7 @@
 - Tenant: límite lógico de aislamiento de una organización cliente. Deployment: instancia de ejecución que puede alojar uno o varios tenants.
 - tenant_id y RLS aíslan tenants; la autorización del Core controla empresas y sucursales.
 - Keycloak central vía OpenID Connect (Authorization Code + PKCE) para autenticación. Core gestiona autorización.
+- Contrato de desarrollo OIDC en docs/OIDC.md, ADR-025/026: realm innoview, clientes separados, issuer canónico y herramientas de aprovisionamiento/verificación. Login de aplicaciones y sesiones aún no implementados.
 
 ## Paquetes previstos
 

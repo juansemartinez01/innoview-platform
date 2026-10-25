@@ -1,6 +1,6 @@
 # Innoview Platform
 
-Fase 0 (Foundation técnico), incrementos 0.1 a 0.6 verificados. Cierre pendiente de revisión del equipo. Fuente de verdad: AGENTS.md y docs/. El Foundation MVP de producto continúa en las fases siguientes; todavía no hay identidad de aplicaciones, organizaciones ni aislamiento multi-tenant.
+Fase 0 oficialmente cerrada. Incremento 1.1: realm/contrato OIDC implementado; pendiente revisión antes de continuar. Fuente de verdad: AGENTS.md y docs/. Todavía no hay login/sesiones en aplicaciones, organizaciones ni aislamiento multi-tenant.
 
 ## Requisitos
 
@@ -23,7 +23,7 @@ pnpm install --frozen-lockfile
 pnpm exec node --version
 ```
 
-Crear `.env` con seis contraseñas aleatorias e independientes, sin imprimirlas. Este comando **falla si el archivo ya existe**; para un entorno existente conservarlo y agregar únicamente las variables faltantes de `.env.example`.
+Crear `.env` con siete contraseñas aleatorias e independientes, sin imprimirlas. Este comando **falla si el archivo ya existe**; para un entorno existente conservarlo y agregar únicamente las variables faltantes de `.env.example`.
 
 ```powershell
 @'
@@ -48,14 +48,16 @@ pnpm db:provision
 pnpm db:show
 pnpm db:run
 pnpm db:show
+pnpm oidc:provision
+pnpm oidc:check
 ```
 
 Resultado esperado: tres servicios `healthy` y `FoundationProbe1792886400000` marcada `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`; todavía no inicia sesión en las aplicaciones.
 
-Validar calidad y pruebas en su PostgreSQL temporal independiente:
+Validar calidad y pruebas en PostgreSQL y Keycloak temporales independientes:
 
 ```powershell
-docker compose -f compose.test.yaml up -d --wait --wait-timeout 120
+docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
 pnpm lint
 pnpm format:check
 pnpm typecheck
@@ -71,7 +73,7 @@ Resultado esperado: controles con código 0, pruebas sin fallos, tres builds y l
 (Invoke-WebRequest 'http://127.0.0.1:3000').StatusCode
 (Invoke-WebRequest 'http://127.0.0.1:3001').StatusCode
 (Invoke-WebRequest 'http://127.0.0.1:3002').StatusCode
-(Invoke-WebRequest 'http://127.0.0.1:8080/realms/master/.well-known/openid-configuration').StatusCode
+(Invoke-WebRequest 'http://127.0.0.1:8080/realms/innoview/.well-known/openid-configuration').StatusCode
 ```
 
 Las cuatro respuestas deben ser 200. Detener `pnpm dev` con Ctrl+C antes de iniciar los servidores del build. Las secciones siguientes explican operación, migraciones y reinicios sin pérdida de datos.
@@ -85,7 +87,7 @@ pnpm install --frozen-lockfile
 pnpm lint
 pnpm format:check
 pnpm typecheck
-# Requiere primero el PostgreSQL temporal descrito abajo.
+# Requiere primero PostgreSQL y Keycloak temporales descritos abajo.
 pnpm test
 pnpm build
 pnpm dev
@@ -100,6 +102,23 @@ Las páginas y la respuesta raíz de la API solo comprueban arranque. NestJS abr
 ## Límites actuales
 
 Sin paquetes compartidos vacíos, módulos comerciales ni worker. API conectada a PostgreSQL mediante TypeORM; solo existen objetos técnicos de demostración. Sin entidades Tenant/Company/Branch/UserIdentity/Membership, RLS ni UoW. OIDC y sesiones en las aplicaciones corresponden a Fase 1; Keycloak sigue separado.
+
+## Contrato OIDC — 1.1
+
+En una instalación de Fase 0, conservar `.env` y agregar TEST_KEYCLOAK_PORT=18081 y TEST_KEYCLOAK_ADMIN_PASSWORD con otra contraseña aleatoria (mínimo 16 caracteres). No cambiar los valores previos ni borrar volúmenes.
+
+```powershell
+pnpm install --frozen-lockfile
+docker compose up -d --wait --wait-timeout 240
+pnpm oidc:provision
+pnpm oidc:check
+```
+
+Issuer canónico: http://127.0.0.1:8080/realms/innoview. KEYCLOAK_HTTP_PORT modifica también KC_HOSTNAME/issuer al recrear el contenedor, conservando Identity. Clientes innoview-portal/innoview-control-center: Code + PKCE S256, callbacks exactos `/auth/callback` en 3000/3001 y logout hacia `/`. Audiencia access token: innoview-api. Scope openid, sin roles/email del IdP como permisos Core. Hoy las aplicaciones no implementan callbacks ni Guards.
+
+El aprovisionador crea únicamente un realm ausente. Si existe, verifica marca y campos del contrato; cualquier diferencia termina sin sobrescribir clientes. No tiene force/import override ni elimina datos. Usa credenciales administrativas locales solo para esta operación. Si falla, revisar el drift y acordar una actualización explícita; no borrar volúmenes. Realm master sigue separado y no se modifica.
+
+Sesiones HttpOnly, CSRF/state/nonce, custodia/rotación de tokens, JWKS, issuer, audiencias, librerías y límites: [docs/OIDC.md](docs/OIDC.md), ADR-025/026. openid-client 6.8.8 y jose 6.2.13 tienen consumidores en herramientas/pruebas; iron-session 9.0.1 está seleccionada para la futura integración de cookies, sin instalación anticipada.
 
 ## Infraestructura local — solo desarrollo
 
@@ -191,27 +210,29 @@ pnpm db:run
 
 Cada comando compila antes de ejecutar el CLI. Editar/revisar el SQL generado antes de ejecutarlo. Como todavía no hay entidades, `generate` no produce cambios; su salida sin cambios tiene código 1 por convención de TypeORM, o 0 con `--check`. La reversión `pnpm db:revert` se bloquea en la base de desarrollo: requiere DB_DISPOSABLE=true y DB_NAME con el formato generado por las pruebas (`innoview_test_` seguido de 32 caracteres hexadecimales). La suite ejecuta reversión y reaplicación por CLI automáticamente en su base descartable. No cambiar esas variables para apuntar a datos existentes.
 
-## Pruebas de integración PostgreSQL
+## Pruebas de integración PostgreSQL y OIDC
 
-Completar `TEST_POSTGRES_PASSWORD` en `.env` con otro valor aleatorio. No reutilizar credenciales de desarrollo/producción. El servidor de pruebas no conecta volúmenes y almacena datos en tmpfs; tiene proyecto y puerto separados (55433 por defecto).
+Completar TEST_POSTGRES_PASSWORD y TEST_KEYCLOAK_ADMIN_PASSWORD con valores aleatorios independientes. No reutilizar credenciales de desarrollo/producción. PostgreSQL usa tmpfs y puerto 55433; Keycloak usa dev-mem sin volúmenes, administrador test_admin y puerto 18081. El test exige puerto distinto del IdP normal y realm innoview inicialmente ausente. Ante un test interrumpido reiniciar solo keycloak-test descartable y esperar salud; nunca resetear el IdP de desarrollo.
 
 ```powershell
 docker compose -f compose.test.yaml config --quiet
-docker compose -f compose.test.yaml up -d --wait --wait-timeout 120
+docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
 pnpm test
 docker compose -f compose.test.yaml down
 ```
 
 Node test runner ejecuta pruebas reales: conexiones, credenciales inválidas, migraciones, CRUD, secuencias, restricciones DDL/roles, defaults de objetos futuros, idempotencia y reversión/reaplicación. Cada ejecución crea una base y roles únicos y los elimina al terminar. Nunca toma DB_NAME como destino de borrado. No omite las pruebas si falta PostgreSQL: falla con una instrucción de configuración. **Estas pruebas no validan aislamiento multi-tenant ni RLS.**
 
+También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/PKCE, emisión para ambos clientes, refresh/logout y preservación de configuraciones ajenas. Los usuarios de prueba son sintéticos/efímeros; los negativos JWT con claves sintéticas se identifican por separado. No se implementa login en las aplicaciones como parte de estos tests.
+
 ## Calidad y CI
 
 `pnpm lint` utiliza ESLint flat config: reglas TypeScript con información de tipos para NestJS y Core Web Vitals/TypeScript para ambas aplicaciones Next.js. No se admiten advertencias. TypeScript conserva `strict` en la base y las diferencias necesarias de resolución NodeNext/bundler en cada aplicación.
 
-`pnpm format` aplica Prettier y `pnpm format:check` verifica formato sin escribir. Se excluyen artefactos, lockfile y archivos que Next.js regenera. Los cambios en documentos existentes son de formato, sin alterar las ADR.
+`pnpm format` aplica Prettier y `pnpm format:check` verifica formato sin escribir. Se excluyen artefactos, lockfile y archivos que Next.js regenera. Las decisiones nuevas se registran explícitamente en las ADR.
 
-`pnpm test` ejecuta los scripts `test` de los workspaces, incluyendo la integración real de API con PostgreSQL. No se agregaron tests ficticios ni se declara cobertura multi-tenant.
+`pnpm test` ejecuta los scripts `test` de los workspaces, incluyendo la integración real de API con PostgreSQL, y las pruebas OIDC de la raíz. No se agregaron tests ficticios ni se declara cobertura multi-tenant.
 
-[GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL temporal con contraseña aleatoria en cada run y lo detiene siempre. No depende de PostgreSQL local ni de secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
+[GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL/Keycloak temporales con contraseñas aleatorias y los detiene al terminar. No depende de servicios locales ni secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
 
-Informe de cierre, evidencia, estructura y riesgos: [docs/FOUNDATION.md](docs/FOUNDATION.md). Análisis y orden propuesto para Identity, Organizations, Memberships y OrganizationalUnit: [docs/PHASE_1_PREPARATION.md](docs/PHASE_1_PREPARATION.md). **Fase 1 no iniciada; requiere revisar el cierre de 0.6.**
+Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato implementado: [docs/OIDC.md](docs/OIDC.md). Diseño de módulos posteriores: [docs/PHASE_1_PREPARATION.md](docs/PHASE_1_PREPARATION.md). **No avanzar a 1.2 sin revisión de 1.1.**

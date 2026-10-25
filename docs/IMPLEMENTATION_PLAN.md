@@ -18,17 +18,19 @@ Desarrollo por incrementos verticales con pruebas, no implementación simultáne
 - [x] 0.3 — Calidad y CI: lint, formato, política común de TypeScript y workflow. Aprobado por el usuario; resultados y política en FOUNDATION.md.
 - [x] 0.4 — Entorno Docker PostgreSQL/Keycloak y bases separadas. Salud, conexiones y persistencia verificadas en Docker Desktop/PowerShell; evidencia en FOUNDATION.md. Aprobado por el usuario antes de 0.5.
 - [x] 0.5 — TypeORM/pg, roles, migraciones y PostgreSQL real. Aprobado por el usuario; evidencia en FOUNDATION.md.
-- [x] 0.6 — Verificación integral desde clon limpio, arranque de aplicaciones, persistencia y separación de credenciales, controles de calidad y documentación final. Cierre presentado para revisión; no iniciar Fase 1 sin revisión del usuario.
+- [x] 0.6 — Verificación integral desde clon limpio, aplicaciones, persistencia, seguridad y documentación. Aprobado; Fase 0 oficialmente cerrada por el usuario.
 
-0.1–0.5 aprobados. Criterios técnicos de Fase 0 verificados en 0.6 el 2026-10-25; evidencia y límites en FOUNDATION.md. La aprobación del cierre está pendiente. Preparación de Identity, Organizations, Memberships y OrganizationalUnit en PHASE_1_PREPARATION.md, exclusivamente como análisis; las tareas de Fase 1 permanecen sin implementar.
+0.1–0.6 aprobados. Fase 0 oficialmente cerrada el 2026-10-25; evidencia en FOUNDATION.md. Fase 1 autorizada exclusivamente para 1.1. Contrato en OIDC.md; módulos posteriores como análisis en PHASE_1_PREPARATION.md.
 
 ### Fase 1 — Identidad y organizaciones
 
-- [ ] Keycloak realm central, clientes OIDC con Authorization Code + PKCE, secretos por entorno.
+- [x] 1.1 — Realm innoview, clientes Code + PKCE separados, issuer/audiencias/scopes, aprovisionamiento sin overwrite, contrato de sesiones, librerías y pruebas OIDC. Pendiente revisión antes de 1.2; ADR-025/026 y OIDC.md.
 - [ ] Next.js login/logout, sesión HttpOnly y validación de tokens en NestJS.
 - [ ] Migraciones tenant/group/company/branch/organizational_unit/user identity/membership.
 - [ ] API para consultar organizaciones accesibles y selector de contexto.
       **Aceptación:** mismo usuario central puede pertenecer a tenants distintos sin mezclar permisos.
+
+Recomendación para el siguiente incremento, aún no autorizado: integrar runtime Identity (login/logout/sesiones Next.js y validación JWT NestJS) sobre 1.1 antes de exponer datos organizacionales. Esta propuesta no implementa 1.2 ni modifica el modelo de Organizations. Las tareas empresariales/RBAC/RLS permanecen pendientes.
 
 ### Fase 2 — Autorización y aislamiento
 

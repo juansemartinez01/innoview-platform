@@ -22,6 +22,7 @@ jobs:
       TURBO_TELEMETRY_DISABLED: '1'
       TEST_DB_HOST: 127.0.0.1
       TEST_DB_PORT: '55433'
+      TEST_KEYCLOAK_PORT: '18081'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -41,18 +42,21 @@ jobs:
         run: pnpm format:check
       - name: Check types
         run: pnpm typecheck
-      - name: Generate disposable PostgreSQL credentials
+      - name: Generate disposable service credentials
         shell: bash
         run: |
           test_password=$(openssl rand -hex 24)
           echo "::add-mask::$test_password"
           echo "TEST_POSTGRES_PASSWORD=$test_password" >> "$GITHUB_ENV"
-      - name: Start disposable PostgreSQL
+          identity_password=$(openssl rand -hex 24)
+          echo "::add-mask::$identity_password"
+          echo "TEST_KEYCLOAK_ADMIN_PASSWORD=$identity_password" >> "$GITHUB_ENV"
+      - name: Start disposable PostgreSQL and Keycloak
         id: test_database
-        run: docker compose -f compose.test.yaml up -d --wait --wait-timeout 120
-      - name: Run real PostgreSQL integration tests
+        run: docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
+      - name: Run PostgreSQL and OIDC integration tests
         run: pnpm test
-      - name: Stop disposable PostgreSQL
+      - name: Stop disposable PostgreSQL and Keycloak
         if: always() && steps.test_database.outcome != 'skipped'
         run: docker compose -f compose.test.yaml down
       - name: Build

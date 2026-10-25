@@ -4,16 +4,16 @@ Fecha de selección: 2026-10-24. No se cambia el stack acordado.
 
 ## Estado de cierre — 2026-10-25
 
-Criterios técnicos de Fase 0 verificados; 0.6 queda presentado para revisión del usuario. 0.1–0.5 ya aprobados. Este cierre cubre herramientas, infraestructura local y persistencia técnica; el Foundation MVP de producto aún requiere las fases de identidad, organizaciones, autorización, RLS y extensibilidad. Fase 1 no iniciada.
+Criterios técnicos verificados y Fase 0 oficialmente cerrada por el usuario tras revisar c069a9a y Actions. Este cierre cubre herramientas, infraestructura local y persistencia técnica. Fase 1 autorizada solo para el contrato/configuración 1.1 descrito en OIDC.md (ADR-025/026); no hay login de aplicaciones, entidades empresariales ni RLS.
 
-| Incremento                   | Estado y evidencia                                                                                                    |
-| ---------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| 0.1 — Acuerdos mínimos       | Aprobado. Tenant/Deployment, TypeORM y riesgos documentados; ADR-023/024                                              |
-| 0.2 — Monorepo               | Aprobado. pnpm/Turbo y tres aplicaciones; commit inicial 764d9b3                                                      |
-| 0.3 — Calidad y CI           | Aprobado. Node 24, ESLint/Prettier y Actions; commit 955ff64                                                          |
-| 0.4 — Infraestructura Docker | Aprobado. PostgreSQL Platform/Identity y Keycloak separados; commit ad5dee9                                           |
-| 0.5 — Persistencia           | Aprobado. Roles, DataSource separados, migración técnica y PostgreSQL real; commit eee7307                            |
-| 0.6 — Verificación y cierre  | Verificado localmente y presentado para revisión. Commit y ejecución de CI asociados se entregan con el informe final |
+| Incremento                   | Estado y evidencia                                                                         |
+| ---------------------------- | ------------------------------------------------------------------------------------------ |
+| 0.1 — Acuerdos mínimos       | Aprobado. Tenant/Deployment, TypeORM y riesgos documentados; ADR-023/024                   |
+| 0.2 — Monorepo               | Aprobado. pnpm/Turbo y tres aplicaciones; commit inicial 764d9b3                           |
+| 0.3 — Calidad y CI           | Aprobado. Node 24, ESLint/Prettier y Actions; commit 955ff64                               |
+| 0.4 — Infraestructura Docker | Aprobado. PostgreSQL Platform/Identity y Keycloak separados; commit ad5dee9                |
+| 0.5 — Persistencia           | Aprobado. Roles, DataSource separados, migración técnica y PostgreSQL real; commit eee7307 |
+| 0.6 — Verificación y cierre  | Aprobado por el usuario; Fase 0 oficialmente cerrada en c069a9a                            |
 
 ### Recorrido integral desde clon limpio
 

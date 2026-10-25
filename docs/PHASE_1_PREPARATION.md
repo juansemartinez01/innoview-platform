@@ -2,6 +2,8 @@
 
 Fecha: 2026-10-25. Las ADR vigentes no cambian. Este documento propone contratos y orden de trabajo para revisión después de cerrar Fase 0; no autoriza implementación automática.
 
+Actualización 1.1: Fase 0 oficialmente aprobada y contrato/configuración OIDC implementado en OIDC.md (ADR-025/026). Las propuestas siguientes son preparación de módulos posteriores, no código implementado. Recomendación a revisar para 1.2: integración runtime de Identity y sesiones antes de exponer datos organizacionales; no se avanza sin autorización.
+
 ## Dependencias y responsabilidades
 
 | Área               | Responsabilidad propuesta                                                                             | Dependencias y límites                                                                                                                                                               |

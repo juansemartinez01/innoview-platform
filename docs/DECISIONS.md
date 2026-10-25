@@ -56,4 +56,20 @@ Agregar una ADR nueva con contexto, alternativas, decisión, impacto y estrategi
 
 ## Pendientes de validación al implementar
 
-Versiones locales de PostgreSQL/Keycloak fijadas y verificadas en 0.4 (ver FOUNDATION.md). Pendientes: librerías OIDC/Next.js compatibles; constraints completas para OrganizationalUnit; auditar estrategia de RLS con pool y workers; elegir hosting/cloud y estrategia de alta disponibilidad; precisar modelo contractual de módulos y licencias.
+Versiones locales PostgreSQL/Keycloak fijadas en 0.4 y librerías/contrato OIDC seleccionados en 1.1 (ADR-025/026, OIDC.md). Pendientes: integrar las sesiones/Guards en aplicaciones; constraints completas para OrganizationalUnit; auditar RLS con pool y workers; hosting/cloud y alta disponibilidad; precisar modelo contractual de módulos y licencias.
+
+## ADR-025 — Contrato OIDC de desarrollo y aprovisionamiento (2026-10-25)
+
+- Contexto: Fase 0 oficialmente cerrada; se requiere identidad central reproducible antes del login de aplicaciones y sin sobrescribir un IdP inicializado.
+- Alternativas: realm master para aplicaciones, import con overwrite, hostname dinámico o realm separado con creación controlada y verificación de drift.
+- Decisión: realm innoview separado de master; issuer público canónico http://127.0.0.1:8080/realms/innoview, puerto derivado de KEYCLOAK_HTTP_PORT y KC_HOSTNAME fijo. Clientes públicos innoview-portal/innoview-control-center con Code + PKCE S256, callbacks/logout/orígenes exactos y sin grants heredados/M2M ni administración IdP; recurso bearer-only innoview-api. Scope openid más mappers mínimos de sub y audiencia API, sin roles/email como autoridad.
+- Impacto: cada app tiene identidad de cliente propia; JWT no concede acceso a tenant/empresa ni privilegios Innoview. Claves y usuarios solo en Identity. Aprovisionador Admin REST crea únicamente un realm ausente; si existe exige marca de gestión y coincidencia de campos, sin PUT/DELETE/override. Drift requiere actualización explícita revisada, no force.
+- Migración: no hay clientes de aplicaciones previos del proyecto ni usuarios empresariales locales. Se crea innoview y se fija hostname en el Compose de desarrollo conservando volúmenes/master. Realms ajenos se preservan y se rechazan como destino. Producción y una futura topología containerizada requieren URLs/TLS/transporte propios sin alterar validación de issuer. Detalle en OIDC.md.
+
+## ADR-026 — Librerías y contrato de sesiones por aplicación (2026-10-25)
+
+- Contexto: preparar Next.js 16/NestJS 12/Node 24 sin implementar login, sesiones ni autorización de negocio en 1.1.
+- Alternativas: adaptador Keycloak específico, framework de autenticación completo, tokens en navegador o integración de estándares con BFF y sesión local.
+- Decisión: openid-client 6.8.8 para Code/PKCE/state/nonce/refresh/logout; jose 6.2.13 para JWKS y JWT RS256 con issuer/audiencia/tiempos/tipo. iron-session 9.0.1 seleccionada para cookie HttpOnly sellada con solo SID; tokens y refresh tokens en servidor, almacenamiento técnico/cifrado a implementar después. Instalar cada librería donde haya consumidor real: en 1.1 solo las dos primeras en herramientas de contrato.
+- Impacto: claves y cookies distintas por aplicación; sesiones locales distintas de SSO, protección CSRF/Origin, validación de state/nonce y rotación single-use de refresh. No usar claims de tenant/roles del IdP como permisos Core ni email como ID global. HTTP local explícito; Secure/HTTPS obligatorio al definir producción. Sin Redis ni un framework de sesiones/UoW adelantado.
+- Migración: no hay sesiones locales previas; no hay datos que migrar. Integración de cookies, almacenamiento técnico, Guards, CSRF y backchannel se implementarán en un incremento posterior tras revisión. La función de referencia de 1.1 no protege aún endpoints. Contrato y riesgos en OIDC.md.

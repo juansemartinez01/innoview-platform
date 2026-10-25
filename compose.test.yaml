@@ -1,4 +1,4 @@
-# Disposable integration PostgreSQL. Never attaches to development volumes.
+# Disposable PostgreSQL and Keycloak contract fixtures. No development volumes.
 name: innoview-platform-test
 services:
   postgres-test:
@@ -17,3 +17,27 @@ services:
       interval: 2s
       timeout: 5s
       retries: 30
+  keycloak-test:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ['start-dev', '--db=dev-mem']
+    mem_limit: 1g
+    environment:
+      KC_HOSTNAME: http://127.0.0.1:${TEST_KEYCLOAK_PORT:-18081}
+      KC_BOOTSTRAP_ADMIN_USERNAME: test_admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${TEST_KEYCLOAK_ADMIN_PASSWORD:?Set TEST_KEYCLOAK_ADMIN_PASSWORD for the disposable identity server}
+      KC_HEALTH_ENABLED: 'true'
+    ports:
+      - '127.0.0.1:${TEST_KEYCLOAK_PORT:-18081}:8080'
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000;
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3;
+          grep -q 'HTTP/1.1 200' <&3
+      interval: 5s
+      timeout: 5s
+      retries: 24
+      start_period: 30s

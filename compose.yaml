@@ -1,4 +1,4 @@
-# Development only. No application authentication or persistence integration yet.
+# Development only. Application login is not implemented yet.
 name: innoview-platform-dev
 
 services:
@@ -55,6 +55,7 @@ services:
       KC_DB_URL: jdbc:postgresql://postgres-identity:5432/keycloak
       KC_DB_USERNAME: identity_local_owner
       KC_DB_PASSWORD: ${IDENTITY_POSTGRES_PASSWORD:?Set IDENTITY_POSTGRES_PASSWORD in .env}
+      KC_HOSTNAME: http://127.0.0.1:${KEYCLOAK_HTTP_PORT:-8080}
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-local_admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
       KC_HEALTH_ENABLED: 'true'
