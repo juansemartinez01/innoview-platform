@@ -1,0 +1,89 @@
+# Development only. No application authentication or persistence integration yet.
+name: innoview-platform-dev
+
+services:
+  postgres-platform:
+    image: postgres:18.6-bookworm
+    environment:
+      POSTGRES_DB: innoview_platform
+      POSTGRES_USER: platform_local_admin
+      POSTGRES_PASSWORD: ${PLATFORM_POSTGRES_PASSWORD:?Set PLATFORM_POSTGRES_PASSWORD in .env}
+    ports:
+      - '127.0.0.1:${PLATFORM_POSTGRES_PORT:-55432}:5432'
+    volumes:
+      - platform-data:/var/lib/postgresql
+    networks:
+      - platform
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  postgres-identity:
+    image: postgres:18.6-bookworm
+    environment:
+      POSTGRES_DB: keycloak
+      POSTGRES_USER: identity_local_owner
+      POSTGRES_PASSWORD: ${IDENTITY_POSTGRES_PASSWORD:?Set IDENTITY_POSTGRES_PASSWORD in .env}
+    volumes:
+      - identity-data:/var/lib/postgresql
+    networks:
+      - identity
+    healthcheck:
+      test:
+        [
+          'CMD-SHELL',
+          'pg_isready -h 127.0.0.1 -U "$${POSTGRES_USER}" -d "$${POSTGRES_DB}"',
+        ]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.8.1
+    command: ['start-dev']
+    mem_limit: 1g
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres-identity:5432/keycloak
+      KC_DB_USERNAME: identity_local_owner
+      KC_DB_PASSWORD: ${IDENTITY_POSTGRES_PASSWORD:?Set IDENTITY_POSTGRES_PASSWORD in .env}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-local_admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Set KEYCLOAK_ADMIN_PASSWORD in .env}
+      KC_HEALTH_ENABLED: 'true'
+      KC_METRICS_ENABLED: 'true'
+    ports:
+      - '127.0.0.1:${KEYCLOAK_HTTP_PORT:-8080}:8080'
+    networks:
+      - identity
+    depends_on:
+      postgres-identity:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - bash
+        - -ec
+        - >-
+          exec 3<>/dev/tcp/127.0.0.1/9000;
+          printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3;
+          grep -q 'HTTP/1.1 200' <&3
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
+
+volumes:
+  platform-data:
+  identity-data:
+
+networks:
+  platform:
+  identity:

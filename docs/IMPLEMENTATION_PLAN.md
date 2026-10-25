@@ -7,7 +7,7 @@ Desarrollo por incrementos verticales con pruebas, no implementación simultáne
 ### Fase 0 — Fundaciones
 
 - [x] Crear monorepo pnpm + Turborepo, apps/portal, apps/control-center, apps/api (0.2).
-- [ ] PostgreSQL Docker para app y Keycloak (bases separadas).
+- [x] PostgreSQL Docker para app y Keycloak (bases separadas, 0.4).
 - [ ] Configurar TypeScript, lint, formato, CI, migraciones y test real contra PostgreSQL.
       **Aceptación:** se levanta stack local, CI verde, migración reversible de prueba.
 
@@ -16,7 +16,7 @@ Desarrollo por incrementos verticales con pruebas, no implementación simultáne
 - [x] 0.1 — Acuerdos mínimos: ADR-023/024, versiones, comandos, estrategia de migraciones y riesgos en FOUNDATION.md y DECISIONS.md.
 - [x] 0.2 — Inicialización: Git local, tres aplicaciones mínimas, lockfile, build/tipos y comprobaciones HTTP en desarrollo y tras build.
 - [x] 0.3 — Calidad y CI: lint, formato, política común de TypeScript y workflow. 0.1/0.2 aprobados por el usuario; resultados y política en FOUNDATION.md. Validar 0.3 antes de avanzar.
-- [ ] 0.4 — Entorno Docker PostgreSQL/Keycloak y bases separadas.
+- [x] 0.4 — Entorno Docker PostgreSQL/Keycloak y bases separadas. Salud, conexiones y persistencia verificadas en Docker Desktop/PowerShell; evidencia en FOUNDATION.md. Pendiente revisión del usuario antes de 0.5.
 - [ ] 0.5 — TypeORM/pg, roles, migraciones y PostgreSQL real.
 - [ ] 0.6 — Verificación integral del stack y documentación final.
 

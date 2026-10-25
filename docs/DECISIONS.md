@@ -56,4 +56,4 @@ Agregar una ADR nueva con contexto, alternativas, decisión, impacto y estrategi
 
 ## Pendientes de validación al implementar
 
-Elegir versión específica de Keycloak/PostgreSQL y librerías OIDC/Next.js compatibles; definir constraints completas para OrganizationalUnit; auditar estrategia de RLS con pool y workers; elegir hosting/cloud y estrategia de alta disponibilidad; precisar modelo contractual de módulos y licencias.
+Versiones locales de PostgreSQL/Keycloak fijadas y verificadas en 0.4 (ver FOUNDATION.md). Pendientes: librerías OIDC/Next.js compatibles; constraints completas para OrganizationalUnit; auditar estrategia de RLS con pool y workers; elegir hosting/cloud y estrategia de alta disponibilidad; precisar modelo contractual de módulos y licencias.
