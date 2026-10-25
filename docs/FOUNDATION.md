@@ -1,4 +1,4 @@
-# Foundation — acuerdos, monorepo, calidad e infraestructura (0.1–0.4)
+# Foundation — acuerdos, monorepo, calidad, infraestructura y persistencia (0.1–0.5)
 
 Fecha de selección: 2026-10-24. No se cambia el stack acordado.
 
@@ -24,7 +24,7 @@ Fecha de selección: 2026-10-24. No se cambia el stack acordado.
 
 Dependencias directas exactas y resolución transitiva en pnpm-lock.yaml. Sin generadores que incorporen Tailwind, bibliotecas visuales, pruebas o paquetes sin uso. Los peers se verifican estrictamente al instalar.
 
-TypeORM es el ORM aprobado; su versión, driver pg y compatibilidad con NestJS se fijan al incorporarlos en 0.5. Imágenes de infraestructura fijadas en 0.4: PostgreSQL 18.6-bookworm y Keycloak 26.8.1. Las librerías OIDC se eligen en Fase 1.
+Persistencia en 0.5: TypeORM 1.1.2, pg 8.23.1 y @types/pg 8.23.1, versiones exactas. Compilación y conexión verificadas con NestJS 12.2.0, TypeScript 6.0.3, Node 24.22.1 y PostgreSQL 18.6. Integración mediante provider asíncrono de DataSource y cierre con el ciclo de vida NestJS; no hace falta agregar @nestjs/typeorm mientras no haya consumidores de repositorios. Imágenes de infraestructura fijadas en 0.4: PostgreSQL 18.6-bookworm y Keycloak 26.8.1. Las librerías OIDC se eligen en Fase 1.
 
 ## Fuentes oficiales consultadas
 
@@ -39,16 +39,71 @@ TypeORM es el ORM aprobado; su versión, driver pg y compatibilidad con NestJS s
 ## Comandos e interfaces
 
 - Raíz: pnpm install --frozen-lockfile, pnpm lint, pnpm format, pnpm format:check, pnpm typecheck, pnpm test, pnpm build, pnpm dev.
-- Portal 3000, Control Center 3001, API 3002; loopback local. Sin variables secretas ni conexiones a servicios externos.
+- Portal 3000, Control Center 3001, API 3002; loopback local. Desde 0.5 la API se conecta al PostgreSQL local con credenciales inyectadas, sin secretos versionados.
 - API ESM con imports locales .js; TypeScript NodeNext preserva resolución válida del código compilado.
 - Sin dependencias internas entre aplicaciones; contratos y paquetes aparecen cuando haya un consumidor concreto.
-- Persistencia prevista: CLI de TypeORM, migraciones versionadas, SQL explícito para RLS, rol migrador separado y prueba reversible en base descartable. Se implementa en 0.5.
+- Persistencia: CLI de TypeORM, migraciones versionadas y rol migrador separado implementados en 0.5. SQL de políticas RLS y contexto tenant siguen pendientes de fases posteriores.
 
 ## Riesgos y próximos acuerdos
 
 Los riesgos de autorización y aislamiento están en DECISIONS.md. La existencia del Control Center no concede privilegios ni representa una autorización implementada. No hay recursos tenant-owned todavía.
 
-Repositorio publicado en GitHub y CI implementada con GitHub Actions en 0.3. Infraestructura local en 0.4. Pendientes: TypeORM/pg y roles en 0.5, librería de sesión/OIDC y bootstrap de organizaciones en Fase 1. No se configuran despliegues ni infraestructura facturable.
+Repositorio publicado en GitHub, CI en 0.3, infraestructura local en 0.4 y persistencia en 0.5. Pendientes: cierre de Fase 0 en 0.6, librería de sesión/OIDC y bootstrap de organizaciones en Fase 1. No se configuran despliegues ni infraestructura facturable.
+
+## Incremento 0.5 — persistencia técnica y privilegios
+
+### Configuración y límites
+
+Infraestructura en apps/api/src/persistence, separada de reglas de negocio. Sin entidades empresariales, decorators ORM, paquetes vacíos, framework UoW ni políticas RLS. Los futuros módulos tendrán sus esquemas y directorios propios de migraciones; no se otorgan permisos a esquemas hipotéticos. DataSource/EntityManager de TypeORM permiten transacciones futuras sin implementar todavía contexto tenant ni UoW.
+
+- connection.config.ts valida host, puerto, nombre de base/usuarios, contraseña requerida (mínimo 16) y TLS explícito disable/require. Los errores nombran campos, nunca valores. TLS require mantiene rejectUnauthorized: true. No hay fallback a credenciales administrativas para app/migraciones.
+- data-sources.ts crea conexiones separadas para app y migrador, con synchronize: false, migrationsRun: false, sin dropSchema, entidades vacías y logging deshabilitado. El CLI TypeORM activa sus logs normales de migraciones, que no contienen credenciales de aprovisionamiento.
+- API: schema foundation, sin migraciones cargadas, validación al conectar de flags, membresías, propiedad y DDL/TEMP. Falla antes de escuchar si el rol no cumple. Provider asíncrono NestJS y cierre del pool al apagar. No se configura un backend de producción ni se imprime la configuración.
+- Migrador: schema platform_meta, tabla migrations y glob de migraciones JavaScript relativas al módulo ESM, independiente del directorio de ejecución. El wrapper comprueba conexión, flags, membresías y propiedad de los esquemas antes de operar, para no ejecutar el CLI accidentalmente como bootstrap. Compila antes de ejecutar; create/generate producen TypeScript para revisión. No hay entidades para generar diferencias todavía.
+- Bootstrap solo en provision.cli.ts; reutiliza PLATFORM_POSTGRES_PASSWORD existente. Provisionamiento explícito, no initdb ni arranque automático de API. Cambios versionados en código de aprovisionamiento, sin scripts SQL manuales sobre tablas de negocio.
+
+### Política de privilegios efectiva en Platform
+
+| Identidad local      | Privilegios                                                                                                                                                                                       |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| platform_local_admin | Administrador bootstrap y propietario de la base existente; no usado por API/CLI de migraciones                                                                                                   |
+| innoview_migrator    | LOGIN, propietario exclusivamente de foundation/platform_meta y sus objetos administrados; CONNECT a Platform; sin SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE/REPLICATION, sin membresías, NOINHERIT |
+| innoview_app         | LOGIN y CONNECT; USAGE foundation; CRUD de tablas; USAGE de secuencias; sin propiedad, DDL, TEMP, TRUNCATE, SET ROLE migrador ni acceso a platform_meta                                           |
+
+Se revocan permisos PUBLIC en la base administrada y schema public. No se cambia la propiedad de la base ni se toca Identity. No se alteran ACL de otras bases del clúster: en producción se necesitarán además políticas de conexión y credenciales limitadas al despliegue.
+
+Los defaults del migrador en foundation conceden únicamente SELECT/INSERT/UPDATE/DELETE y USAGE de secuencias a app. Se revocan grants previos/defaults para PUBLIC/app antes de reconciliar, y EXECUTE de funciones actuales/futuras permanece denegado. platform_meta no concede USAGE a app ni privilegios sobre tablas/secuencias. Así el historial no queda escribible por aplicación. Objetos creados por otros propietarios se rechazan, no se reasignan silenciosamente.
+
+Provisionamiento en transacción con lock asesor: crea roles con marcador de propiedad; rechaza roles ajenos, membresías inesperadas, propiedad de app o migrador propietario de bases y esquemas/objetos con propietario inesperado. Al repetirlo reconcilia ACL y contraseñas sin borrar datos. Contraseñas citadas mediante pg.escapeLiteral e identificadores validados/citados; los errores PostgreSQL de este procedimiento no se imprimen porque pueden contener SQL sensible. No se registra el valor de contraseñas.
+
+### Operación y pruebas
+
+Comandos desde raíz: pnpm db:provision, db:show, db:run, db:create y db:generate. Las rutas para create/generate son relativas a apps/api. Documentación ejecutable y preparación de .env en README.md. Mantener credenciales bootstrap/migrador fuera del entorno de API en despliegues futuros; el .env conjunto es conveniencia solo local.
+
+Revert restringido por el wrapper a DB_DISPOSABLE=true y nombre innoview_test_ seguido de 32 hexadecimales. No es una autorización de producción: nunca apuntarlo a datos existentes. La suite genera su propio nombre, crea la base, ejecuta CLI revert/run y la elimina junto con roles generados. No lee DB_NAME de desarrollo como destino de borrado. No hay reversión sobre el volumen local.
+
+compose.test.yaml crea un PostgreSQL 18.6 independiente, puerto loopback 55433, sin volúmenes y con tmpfs. Node test runner (sin Jest/Testcontainers ni librerías extra) usa TEST_*; requiere el servicio real y falla si falta configuración. En Actions se genera contraseña aleatoria, se enmascara, se arranca el mismo Compose temporal y se detiene con always(). No se modifica Compose de desarrollo ni se borran sus volúmenes.
+
+Las pruebas cubren conexión, credenciales inválidas, flags y membresías, propiedad, migración aplicada por migrador, CRUD y secuencias, DDL/TEMP/TRUNCATE/SET ROLE/metadata denegados, defaults de objetos futuros, repetición sin pérdida de datos, validación del rol de API y reversión/reaplicación por CLI. **No son pruebas de aislamiento multi-tenant/RLS.**
+
+### Validación de 0.5 — 2026-10-25
+
+- Versiones publicadas y engines/peers consultados; pnpm install --frozen-lockfile sin conflictos. Sin actualización de imágenes, Node, NestJS ni TypeScript.
+- Pruebas reales con PostgreSQL 18.6 temporal: 12 resultados exitosos del runner (contenedor principal y 11 subpruebas), cero fallos y cero omitidos. Ejecución de migraciones por migrador, CRUD por app, rechazo de permisos extra, idempotencia antes/después de crear objetos y reversión/reaplicación a través del CLI.
+- En el volumen local existente: db:provision ejecutado repetidamente; db:show pasó de pendiente a aplicada; db:run aplicó la migración y al repetirlo no encontró pendientes. No se borraron/recrearon volúmenes de desarrollo ni se revirtió su migración.
+- db:revert rechazó la base de desarrollo con código 1, sin ejecutar cambios. db:create/db:generate --help disponibles; db:generate con --check devolvió 0 y ninguna diferencia (sin entidades todavía).
+- SQL local confirmó SUPERUSER/BYPASSRLS/CREATEDB/CREATEROLE/REPLICATION falsos para ambos roles y tablas foundation.persistence_probe/platform_meta.migrations propiedad de innoview_migrator.
+- API NestJS compilada arrancó con PersistenceModule y respondió HTTP 200; se cerró el proceso de comprobación. La suite verifica además el rechazo de roles incorrectos para API y CLI.
+- lint, formato, tipos, tests y build se ejecutan antes de publicar; el estado remoto de Actions asociado al commit se informa en la entrega. PostgreSQL temporal se detiene sin tocar el proyecto Compose de desarrollo.
+- Sin credenciales reales versionadas. Las nuevas contraseñas locales se agregan al .env ignorado, conservando las anteriores. No se avanza a 0.6; todavía no se valida aislamiento multi-tenant.
+
+### Referencias de persistencia
+
+- https://typeorm.io/docs/data-source/data-source-options/ y https://typeorm.io/docs/migrations/setup/ — opciones y CLI. Engines/peers verificados mediante pnpm view typeorm/pg.
+- https://docs.nestjs.com/fundamentals/custom-providers — provider asíncrono para DataSource.
+- https://node-postgres.com/features/connecting — conexión PostgreSQL explícita.
+- https://www.postgresql.org/docs/18/sql-grant.html y https://www.postgresql.org/docs/18/sql-alterdefaultprivileges.html — permisos actuales y futuros por propietario/esquema.
+- https://nodejs.org/docs/latest-v24.x/api/test.html — runner nativo y subpruebas.
 
 ## Incremento 0.4 — infraestructura local
 

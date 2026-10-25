@@ -8,7 +8,9 @@ async function bootstrap(): Promise<void> {
   await app.listen(3002, '127.0.0.1');
 }
 
-bootstrap().catch((error: unknown) => {
-  console.error(error);
+bootstrap().catch(() => {
+  console.error(
+    'API startup failed. Verify database configuration and provisioning.',
+  );
   process.exitCode = 1;
 });

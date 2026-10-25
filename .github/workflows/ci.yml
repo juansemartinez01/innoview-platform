@@ -20,6 +20,8 @@ jobs:
     env:
       NEXT_TELEMETRY_DISABLED: '1'
       TURBO_TELEMETRY_DISABLED: '1'
+      TEST_DB_HOST: 127.0.0.1
+      TEST_DB_PORT: '55433'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
@@ -39,7 +41,19 @@ jobs:
         run: pnpm format:check
       - name: Check types
         run: pnpm typecheck
-      - name: Run workspace test scripts when present
+      - name: Generate disposable PostgreSQL credentials
+        shell: bash
+        run: |
+          test_password=$(openssl rand -hex 24)
+          echo "::add-mask::$test_password"
+          echo "TEST_POSTGRES_PASSWORD=$test_password" >> "$GITHUB_ENV"
+      - name: Start disposable PostgreSQL
+        id: test_database
+        run: docker compose -f compose.test.yaml up -d --wait --wait-timeout 120
+      - name: Run real PostgreSQL integration tests
         run: pnpm test
+      - name: Stop disposable PostgreSQL
+        if: always() && steps.test_database.outcome != 'skipped'
+        run: docker compose -f compose.test.yaml down
       - name: Build
         run: pnpm build

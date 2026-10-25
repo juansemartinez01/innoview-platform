@@ -11,6 +11,7 @@ export default defineConfig([
     '**/node_modules/**',
     '**/.next/**',
     '**/dist/**',
+    '**/dist-test/**',
     '**/out/**',
     '**/coverage/**',
     '**/.turbo/**',

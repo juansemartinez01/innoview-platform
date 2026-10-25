@@ -20,7 +20,13 @@
     "lint": "eslint . --max-warnings=0",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
-    "test": "pnpm -r --if-present test"
+    "test": "pnpm -r --if-present test",
+    "db:provision": "pnpm --filter @innoview/api db:provision",
+    "db:run": "pnpm --filter @innoview/api db:run",
+    "db:show": "pnpm --filter @innoview/api db:show",
+    "db:create": "pnpm --filter @innoview/api db:create",
+    "db:generate": "pnpm --filter @innoview/api db:generate",
+    "db:revert": "pnpm --filter @innoview/api db:revert"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",
