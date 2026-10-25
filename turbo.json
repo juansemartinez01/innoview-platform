@@ -5,7 +5,15 @@
       "dependsOn": ["^build"],
       "outputs": ["dist/**", ".next/**", "!.next/cache/**"]
     },
-    "typecheck": { "dependsOn": ["^typecheck"], "outputs": [] },
-    "dev": { "cache": false, "persistent": true }
-  }
+    "typecheck": {
+      "dependsOn": ["^build", "^typecheck"],
+      "outputs": []
+    },
+    "dev": {
+      "dependsOn": ["^build"],
+      "cache": false,
+      "persistent": true
+    }
+  },
+  "globalPassThroughEnv": ["DB_*", "AUTH_*", "OIDC_*", "PORTAL_*", "CONTROL_*"]
 }

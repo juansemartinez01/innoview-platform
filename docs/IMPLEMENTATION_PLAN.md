@@ -20,17 +20,19 @@ Desarrollo por incrementos verticales con pruebas, no implementación simultáne
 - [x] 0.5 — TypeORM/pg, roles, migraciones y PostgreSQL real. Aprobado por el usuario; evidencia en FOUNDATION.md.
 - [x] 0.6 — Verificación integral desde clon limpio, aplicaciones, persistencia, seguridad y documentación. Aprobado; Fase 0 oficialmente cerrada por el usuario.
 
-0.1–0.6 aprobados. Fase 0 oficialmente cerrada el 2026-10-25; evidencia en FOUNDATION.md. Fase 1 autorizada exclusivamente para 1.1. Contrato en OIDC.md; módulos posteriores como análisis en PHASE_1_PREPARATION.md.
+0.1–0.6 aprobados. Fase 0 oficialmente cerrada el 2026-10-25; evidencia en FOUNDATION.md. 1.1 aprobado; Fase 1 autorizada exclusivamente hasta 1.2. Contrato/runtime en OIDC.md; módulos posteriores como análisis en PHASE_1_PREPARATION.md.
 
 ### Fase 1 — Identidad y organizaciones
 
-- [x] 1.1 — Realm innoview, clientes Code + PKCE separados, issuer/audiencias/scopes, aprovisionamiento sin overwrite, contrato de sesiones, librerías y pruebas OIDC. Pendiente revisión antes de 1.2; ADR-025/026 y OIDC.md.
-- [ ] Next.js login/logout, sesión HttpOnly y validación de tokens en NestJS.
-- [ ] Migraciones tenant/group/company/branch/organizational_unit/user identity/membership.
-- [ ] API para consultar organizaciones accesibles y selector de contexto.
-      **Aceptación:** mismo usuario central puede pertenecer a tenants distintos sin mezclar permisos.
+- [x] 1.1 — Realm innoview, clientes Code + PKCE separados, issuer/audiencias/scopes, aprovisionamiento sin overwrite, contrato de sesiones, librerías y pruebas OIDC. Aprobado por el usuario en 6de8c38; ADR-025/026 y OIDC.md.
+- [x] 1.2 — Integración runtime: login/logout en ambos Next.js, sesiones técnicas HttpOnly/servidor cifrado, CSRF, refresh serializado, Guard JWT y GET /auth/me. Pruebas reales PostgreSQL/Keycloak/HTTP. Pendiente revisión antes de continuar; ADR-027 y OIDC.md.
+- [ ] 1.3 — Identity local: UserIdentity referenciada por issuer/sub y contrato público de identidad; sin contraseñas locales ni autorización implícita.
+- [ ] 1.4 — Organizations: Tenant, BusinessGroup, Company, Branch y OrganizationalUnit, migraciones/constraints y contratos por módulo.
+- [ ] 1.5 — Memberships: identidad/tenant, estados y bootstrap controlado. Acordar previamente consulta de membresías con el futuro aislamiento fail-closed.
+- [ ] 1.6 — Contexto organizacional: consulta de organizaciones accesibles y selector, sin confiar en el contexto del frontend.
+      **Aceptación final:** identidad central y relaciones organizacionales verificables. La autorización empresarial y RLS siguen en Fase 2; no declarar acceso multi-tenant seguro antes de incorporarlos.
 
-Recomendación para el siguiente incremento, aún no autorizado: integrar runtime Identity (login/logout/sesiones Next.js y validación JWT NestJS) sobre 1.1 antes de exponer datos organizacionales. Esta propuesta no implementa 1.2 ni modifica el modelo de Organizations. Las tareas empresariales/RBAC/RLS permanecen pendientes.
+Los números 1.2–1.6 formalizan la secuencia solicitada: primero runtime, luego identidad local y organizaciones. El modelo aprobado no cambia. Solo 1.1/1.2 están implementados. Recomendación posterior a la revisión: acordar 1.3 con contrato de identidad y bootstrap, sin adelantar organizaciones/RBAC/RLS. No iniciado.
 
 ### Fase 2 — Autorización y aislamiento
 

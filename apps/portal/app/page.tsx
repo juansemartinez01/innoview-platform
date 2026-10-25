@@ -1,10 +1,69 @@
+'use client';
+import { useEffect, useState } from 'react';
+type Session = {
+  authenticated: boolean;
+  csrf: string;
+  identity?: { subject: string; issuer: string };
+};
 export default function Home() {
+  const [session, setSession] = useState<Session>();
+  const [error, setError] = useState(false);
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.has('state')) {
+      window.location.replace(
+        '/auth/logout/callback?' +
+          new URLSearchParams({ state: params.get('state')! }),
+      );
+      return;
+    }
+    const controller = new AbortController();
+    fetch('/auth/session', { cache: 'no-store', signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error('Unavailable');
+        setSession(await response.json());
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setError(true);
+      });
+    return () => controller.abort();
+  }, []);
   return (
-    <main>
+    <main
+      style={{
+        maxWidth: 640,
+        margin: '64px auto',
+        padding: 24,
+        fontFamily: 'system-ui',
+      }}
+    >
       <h1>Portal Innoview</h1>
-      <p>
-        Base técnica de Innoview Platform. Autenticación pendiente de Fase 1.
-      </p>
+      <p>Identidad centralizada de Innoview Platform.</p>
+
+      {error ? (
+        <p role="alert">
+          No se pudo verificar la sesión. Recargá para reintentar.
+        </p>
+      ) : !session ? (
+        <p>Verificando sesión…</p>
+      ) : session.authenticated ? (
+        <>
+          <h2>Sesión iniciada</h2>
+          <p>Identidad: {session.identity?.subject}</p>
+          <form method="post" action="/auth/logout">
+            <input type="hidden" name="csrf" value={session.csrf} />
+            <button type="submit">Cerrar sesión local</button>
+            <button name="sso" value="true" type="submit">
+              Cerrar sesión también en Keycloak
+            </button>
+          </form>
+        </>
+      ) : (
+        <form method="post" action="/auth/login">
+          <input type="hidden" name="csrf" value={session.csrf} />
+          <button type="submit">Iniciar sesión</button>
+        </form>
+      )}
     </main>
   );
 }

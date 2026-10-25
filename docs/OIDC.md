@@ -1,109 +1,128 @@
-# OIDC — contrato e identidad centralizada (incremento 1.1)
+# Identity — contrato OIDC y runtime BFF
 
-Fecha: 2026-10-25. ADR-025/026. Realm y clientes configurados y verificados; login de aplicaciones, sesiones persistentes y Guards todavía no implementados. No hay entidades empresariales ni concesión de acceso a tenants.
+Incremento 1.1 aprobado en 6de8c38. Incremento 1.2 implementado, pendiente de revisión. ADR-025/026/027. No hay UserIdentity local, organizaciones, Memberships, RBAC ni RLS. Keycloak autentica; Core autorizará. Una identidad válida en Control Center no concede administración Innoview.
 
-## Topología y autoridad
+## Autoridad, clientes y scopes
 
-Keycloak autentica; Platform Core autoriza. El realm de aplicación es **innoview**, separado de **master**, reservado para administrar el IdP. Identidad estable futura: `(issuer, sub)`, nunca email como clave global. Un JWT válido, un azp de Control Center o un rol de Keycloak no conceden acceso a empresas, tenants o administración Innoview.
+Realm de aplicación **innoview**, separado de **master**. Identidad estable `(issuer, sub)`, nunca email como clave global ni roles/tenant_id del token como autorización. No se almacenan contraseñas empresariales en Platform.
 
-En desarrollo el issuer canónico es **http://127.0.0.1:8080/realms/innoview**. KEYCLOAK_HTTP_PORT cambia tanto la publicación como KC_HOSTNAME y el issuer del contrato. Navegador, Next.js y NestJS ejecutados en el host usan esa misma URL. No alternar localhost/127.0.0.1, no sustituir issuer por un hostname interno ni deshabilitar su comprobación.
+Issuer local canónico: **http://127.0.0.1:8080/realms/innoview**. KEYCLOAK_HTTP_PORT cambia la publicación y KC_HOSTNAME; actualizar también OIDC_ISSUER si se modifica. No alternar localhost/127.0.0.1 ni reemplazar el issuer por keycloak:8080. Las aplicaciones corren en el host. Discovery desde Docker conserva el issuer público; una futura containerización completa necesitará resolver esa autoridad desde todos los consumidores sin desactivar issuer/TLS.
 
-KC_HOSTNAME contiene la URL pública completa. Discovery mantiene el issuer canónico incluso al consultarlo desde la red Docker mediante keycloak:8080; esto se verificó. Actualmente las aplicaciones corren en el host, por lo que también alcanzan directamente JWKS/token/logout por la URL canónica. Si se containerizan después, resolver esa URL pública mediante DNS/proxy compartido, o adaptar explícitamente el transporte backchannel manteniendo el issuer y la validación TLS. No cambiar los claims para corregir un problema de red. La topología containerizada completa no se implementa en 1.1.
+| Cliente                 | Contrato                  | Callback                            | Post-logout / origen                           |
+| ----------------------- | ------------------------- | ----------------------------------- | ---------------------------------------------- |
+| innoview-portal         | Público, Code + PKCE S256 | http://127.0.0.1:3000/auth/callback | http://127.0.0.1:3000/ / http://127.0.0.1:3000 |
+| innoview-control-center | Público, Code + PKCE S256 | http://127.0.0.1:3001/auth/callback | http://127.0.0.1:3001/ / http://127.0.0.1:3001 |
+| innoview-api            | Recurso bearer-only       | Ninguno                             | Ninguno                                        |
 
-Esta URL HTTP y sslRequired=none son exclusivos del entorno loopback de desarrollo. Producción requiere issuer HTTPS estable, redirecciones de sus dominios y política TLS independiente; no reutilizar este realm como configuración de producción.
+Scope solicitado **openid**. Scope predeterminado propio innoview-api-access agrega sub y audiencia innoview-api al access token mediante dos mappers explícitos, sin agregar audiencia API al ID token. Sin scopes profile/email/roles/offline_access, wildcards, privilegios administrativos, Implicit, password grant, service accounts, device grant, CIBA o token exchange para aplicaciones. fullScopeAllowed=false. Sub requiere mapper explícito al retirar los scopes estándar de Keycloak 26; su emisión real está probada.
 
-## Clientes y scopes
+Clientes públicos con PKCE y BFF: el intercambio ocurre en servidor, no en una SPA. No hay client secrets que distribuir. Un cambio futuro a clientes confidenciales requiere decisión y actualización explícitas.
 
-| Cliente                 | Tipo/flujo                                                         | Callback exacto                     | Post-logout y origen permitido                        |
-| ----------------------- | ------------------------------------------------------------------ | ----------------------------------- | ----------------------------------------------------- |
-| innoview-portal         | Público, Authorization Code + PKCE S256                            | http://127.0.0.1:3000/auth/callback | http://127.0.0.1:3000/ y origen http://127.0.0.1:3000 |
-| innoview-control-center | Público, Authorization Code + PKCE S256                            | http://127.0.0.1:3001/auth/callback | http://127.0.0.1:3001/ y origen http://127.0.0.1:3001 |
-| innoview-api            | Recurso bearer-only, sin grants interactivos ni machine-to-machine | Ninguno                             | Ninguno                                               |
+## Aprovisionamiento del IdP
 
-Sin wildcards, client secrets de aplicaciones, Implicit Flow, password grant, service accounts, device grant, CIBA o token exchange para los clientes frontend. fullScopeAllowed=false. No se asignan privilegios administrativos de Keycloak. Los clientes internos creados por Keycloak son infraestructura del IdP; no son clientes de negocio ni origen de permisos Core.
-
-Elegimos clientes públicos con PKCE, compatible con intercambio Code desde un backend Next.js sin distribuir secretos de cliente. Esto no convierte a las apps en SPA con tokens en navegador: el contrato de integración es BFF, con intercambio y almacenamiento de tokens exclusivamente servidor. Alternativa considerada: clientes confidenciales con secretos por entorno; se evita introducir su distribución antes de necesitarla. Un cambio de tipo futuro requiere migración explícita de configuración, no una reconciliación silenciosa.
-
-Scope solicitado: **openid**. Scope predeterminado propio **innoview-api-access**, oculto del texto scope del token, agrega únicamente `sub` mediante oidc-sub-mapper y audiencia `innoview-api` mediante oidc-audience-mapper. No agrega la audiencia API al ID token. Sin profile, email, roles u offline_access como scopes de estos clientes. `sub` requiere mapper explícito en Keycloak 26 al retirar scopes estándar; fue detectado y corregido mediante una emisión real.
-
-Los callbacks están registrados para la integración posterior: hoy esas rutas no implementan login y pueden devolver 404. Los tests interceptan el código sin llamar a las aplicaciones; no agregan pantallas ni endpoints de autenticación.
-
-## Aprovisionamiento seguro y reproducible
-
-Fuente versionada: infra/keycloak/contract.mjs; solo configuración sin usuarios, contraseñas, tokens ni claves privadas. Keycloak genera sus claves y las persiste en PostgreSQL Identity. No se exportan realms con usuarios o secretos.
+Fuente sin usuarios ni secretos: infra/keycloak/contract.mjs. Keycloak genera/persiste sus claves en PostgreSQL Identity. Desde raíz:
 
 ```powershell
-pnpm install --frozen-lockfile
 docker compose up -d --wait --wait-timeout 240
 pnpm oidc:provision
 pnpm oidc:check
 ```
 
-Funciona tanto sobre un entorno limpio como sobre el PostgreSQL/Keycloak existente: obtiene un token administrativo temporal del realm master usando KEYCLOAK_ADMIN_USERNAME/PASSWORD del .env local (mínimo 16 caracteres), consulta innoview y crea el realm completo por Admin REST únicamente si falta. La autenticación password de admin-cli se utiliza solo para esta operación bootstrap local del IdP, nunca como flujo de las aplicaciones. Ese token y la contraseña no se imprimen ni se guardan en el repositorio, y no se entregan a Next.js/NestJS.
+El administrador local de master obtiene un token temporal admin-cli para esta operación controlada; nunca se entrega a aplicaciones ni se imprime. El aprovisionador crea únicamente un realm ausente. Si existe, requiere marca de gestión y coincidencia de flags/clientes/scopes/mappers; realiza solo lecturas, sin PUT/DELETE/force/override. Drift o realm ajeno: falla preservándolo. No sobrescribir configuraciones ni borrar volúmenes para resolver diferencias. check verifica además discovery, issuer y JWKS públicos utilizables, exclusivamente con claves públicas.
 
-Si innoview existe, requiere su marca `innoview.managed-by=innoview-platform/oidc-v1` y verifica campos gestionados: flags del realm/clientes, PKCE, callbacks/logout/orígenes, scopes y mappers, ausencia de servicios de autorización/overrides de flujo/mappers directos inesperados. Omite IDs generados y metadatos internos del servidor. Repetir el comando sobre una configuración coincidente hace solo lecturas; no modifica usuarios, claves ni clientes.
+## Runtime y rutas
 
-Realm ajeno, cliente faltante o diferencia de configuración: salida no cero con nombres de campos; **no PUT, DELETE ni overwrite** desde el aprovisionador. No hay flag force ni import con override. Una modificación futura exige revisar el drift, respaldar y acordar una actualización explícita/auditada; no borrar volúmenes ni renombrar usuarios para resolverla. El comando check es de solo lectura y también verifica discovery/JWKS. Usa credenciales administrativas porque los parámetros privados de clientes no son parte del discovery público.
+Ambas aplicaciones usan packages/identity-bff, con dos consumidores reales y sin reglas empresariales. Next.js Route Handlers en runtime Node; los componentes cliente solo reciben estado mínimo y token CSRF, nunca access/refresh tokens.
 
-## Librerías y compatibilidad seleccionadas
+| Método/ruta               | Comportamiento                                                                                                         |
+| ------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| GET /                     | Pantalla mínima: iniciar sesión, identidad autenticada, logout local/SSO                                               |
+| GET /auth/session         | Estado mínimo desde el BFF; valida/renueva sesión y consulta la API; crea sesión anónima para CSRF cuando corresponde  |
+| POST /auth/login          | Exige cookie, Origin exacto y CSRF; crea transacción de un uso y redirige al IdP con Code/PKCE/state/nonce             |
+| GET /auth/callback        | Consume atómicamente la transacción, valida state/nonce/issuer y firma del ID token, intercambia code y crea SID nuevo |
+| POST /auth/logout         | Exige Origin/CSRF, elimina sesión y cookie; opcional sso=true inicia logout en Keycloak                                |
+| GET /auth/logout/callback | Consume state de logout de un uso, borra cookie transitoria y vuelve a raíz; no crea sesión                            |
+| GET API /auth/me          | Guard JWT; devuelve solo issuer, subject y clientId; 401 ante credenciales inválidas                                   |
 
-| Librería      | Versión | Uso y evidencia                                                                                                                                                                                                                                                                                                   |
-| ------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| openid-client | 6.8.8   | ESM/Fetch/WebCrypto, Node >=20. Discovery y Code + PKCE/validación de state/nonce, ID token firmado, refresh y logout probados con Node 24.22.1 y Keycloak 26.8.1. Seleccionada para Route Handlers Next.js 16 en runtime Node                                                                                    |
-| jose          | 6.2.13  | ESM y WebCrypto; JWKS/JWS/JWT sin adaptador dependiente de Nest. Verificador de referencia probado con claves públicas de Keycloak y negativos criptográficos. Seleccionada para un provider/Guard NestJS 12 posterior                                                                                            |
-| iron-session  | 9.0.1   | Seleccionada para sellar la cookie HttpOnly que contendrá solo un identificador opaco, no tokens. Node >=22.13, ESM y API documentada `getIronSession(await cookies(), options)`, compatible con cookies asíncronas de Next.js 16. No se instala hasta implementar sesiones, porque todavía no hay ese consumidor |
+Retorno admitido exclusivamente `/`; se rechazan destinos arbitrarios, incluso si el navegador los envía. Callback se reconstruye desde la configuración confiable, no desde Host/X-Forwarded-Host. Cookies y respuestas de sesión no se cachean; logging de URLs de peticiones Next desactivado para evitar registrar códigos OIDC. Errores de autenticación genéricos, sin respuestas del proveedor, contraseñas, cabeceras ni SQL sensible.
 
-Las dos primeras se instalan como devDependencies raíz porque su consumidor actual son las herramientas y pruebas de contrato. Al integrar aplicaciones se declararán como dependencias de cada consumidor real. No se agregan Auth.js, Passport, Redis ni un SDK Keycloak específico. La compatibilidad de iron-session es documental por sus requisitos/API; su integración real con cookies permanece pendiente, no se presenta como probada.
+### Login y CSRF
 
-## Flujos a integrar después — no implementados en 1.1
+La sesión anónima entrega un token CSRF ligado al registro servidor. POST requiere Origin exactamente igual al origen configurado y token CSRF válido; también rechaza Sec-Fetch-Site cross-site. Formularios de mismo origen aportan Origin automáticamente. Login guarda state, nonce y PKCE verifier independientes dentro del payload cifrado, con duración de cinco minutos y vínculo al SID sellado del navegador.
 
-### Login y sesión local de cada aplicación
+Callback elimina el registro con DELETE RETURNING antes del intercambio HTTP, incluso si la validación falla. openid-client comprueba state, nonce, issuer y audiencia del ID token; enableNonRepudiationChecks exige su firma RS256. Códigos/transacciones no se reintentan. Una petición callback sin transacción login no destruye una sesión autenticada. Se genera SID nuevo y cookie nueva después del éxito; iron-session 9 no permite reutilizar un objeto destruido.
 
-1. Un Route Handler Node recibe el inicio local de login. Si es POST, valida Origin y token CSRF ligado a la sesión/transacción; no aceptar redirects de retorno arbitrarios. Genera state, nonce y PKCE verifier independientes y aleatorios con openid-client. Mantiene esos datos solo en servidor, ligados a una transacción de un uso y al navegador, máximo 5 minutos.
-2. Redirige al authorization endpoint con response_type=code, scope=openid, client_id correspondiente, callback exacto, state, nonce, code_challenge y método S256. No poner verifier ni tokens en URL.
-3. Callback GET valida transacción, state, issuer de la respuesta y errores. Intercambia el code con el verifier desde servidor, sin una transacción PostgreSQL abierta durante HTTP. openid-client valida issuer/audiencia/nonce del ID token y se habilita enableNonRepudiationChecks para comprobar su firma. Consumir/inutilizar la transacción incluso ante errores; no reintentar ciegamente códigos ya intercambiados.
-4. Regenera un SID aleatorio, guarda la sesión técnica servidor por aplicación/issuer/sub y entrega solo ese SID sellado por iron-session en cookie HttpOnly. Los tokens se almacenan del lado servidor, cifrados en reposo con una clave separada y nunca en localStorage, sessionStorage, cookies con tokens ni logs. Access y refresh tokens nunca se entregan al navegador; el ID token solo se transmite al IdP cuando se utiliza como id_token_hint en el logout estándar. El almacenamiento técnico de sesiones y su cifrado se implementarán después, con PostgreSQL existente; no se crean tablas en 1.1.
-5. Next.js valida sesión y expiración en servidor y envía access token a la URL de API configurada mediante Authorization Bearer. Nunca proxy a un destino tomado del usuario. La autorización organizacional se consulta al Core cuando exista; no se guarda como autoridad un permiso declarado por el frontend.
+### Cookies y almacenamiento
 
-Cookies distintas para Portal/Control Center, claves de sellado diferentes y sesiones particionadas por cliente. En desarrollo nombres `innoview.portal.sid` y `innoview.control.sid`, HttpOnly, SameSite=Lax, Path=/, sin Domain y Secure=false solo por HTTP local. Las cookies no se aíslan por puerto: ambos servidores pueden recibir cookies del mismo host, por lo que no deben aceptar ni poder descifrar las de la otra app. En HTTPS usar nombres __Host- específicos, Secure=true y host-only. Crear/modificar cookies en Route Handlers/Server Actions mediante await cookies(), no durante un render Server Component. No usar una cookie sellada como sustituto del registro de revocación servidor.
+Cookie solo con SID aleatorio de 256 bits, sellado por iron-session. Nombres locales innoview.portal.sid / innoview.control.sid; HttpOnly, SameSite=Lax, Path=/, sin Domain. Con HTTPS: nombres __Host- específicos y Secure=true. HTTP solo con AUTH_ENV=development y AUTH_ALLOW_HTTP=true, para URLs 127.0.0.1. Fuera de esa excepción las URLs requieren HTTPS; PostgreSQL requiere DB_SSL=require con verificación de certificados. No derivar estas decisiones de headers enviados por clientes.
 
-### Expiración, refresh y logout
+Cookies no se aíslan por puerto: claves, nombres, roles y esquemas son distintos. Cada proceso desplegado debe recibir únicamente sus propias credenciales y claves, nunca las del otro frontend ni bootstrap/migrador. El .env raíz es una comodidad local; no distribuirlo como entorno de producción. Los tests lanzan procesos con variables mínimas y prueban que un BFF no acepta el sello del otro.
 
-- Access token: 300 segundos; authorization code: 60 segundos desde su emisión. Sesión SSO: idle 1800 segundos, máxima 28800. Sesión local no puede prolongar esas garantías: comprobar expiración, idle y revocación en servidor, y no superar 8 horas de duración absoluta.
-- Refresh online y rotación en cada uso: revokeRefreshToken=true, maxReuse=0. Serializar renovaciones por sesión y coordinar instancias mediante control de concurrencia/leases; no mantener una transacción SQL durante la llamada al IdP. Una respuesta retrasada no debe sobrescribir una renovación posterior. Ante fallo definitivo de refresh, revocar sesión local y solicitar login; no reutilizar refresh tokens antiguos ni solicitar offline_access.
-- Logout local: POST con validación Origin/CSRF, invalidar sesión servidor y cookie primero. Logout SSO: RP-initiated logout con id_token_hint del cliente, post_logout_redirect_uri fijo registrado y state de logout de un uso. Validar ese retorno sin reactivar la sesión. Nunca incluir access/refresh token en URLs. Preferir envío POST al endpoint de logout y omitir id_token_hint de logs, trazas y URLs registradas; las pruebas de contrato ejercitan también la variante GET admitida por el protocolo.
-- La sesión SSO de Keycloak y las dos sesiones locales son diferentes. Logout local de Portal no garantiza logout de Control Center ni del IdP. Logout IdP no borra instantáneamente cookies de otras apps: sin backchannel implementado, detectar fallo de refresh y limitar la vigencia del access token. El handler backchannel y su prueba quedan pendientes de la integración de sesiones; 1.1 no promete revocación instantánea entre aplicaciones.
+Tablas técnicas portal_sessions.sessions y control_sessions.sessions, propietarias del migrador. Solo su rol BFF tiene USAGE y CRUD en su esquema; API no tiene acceso, los BFF no pueden DDL ni acceder al esquema del otro. TypeORM con synchronize=false, sin migraciones automáticas ni logging SQL. No hay entidades empresariales.
 
-### Validación de access tokens en NestJS
+En la base solo se conserva SHA-256 del SID; payload AES-256-GCM contiene tokens, identidad, CSRF y secretos de transacción. IV aleatorio por escritura, AAD cliente/hash; claves de 32 bytes independientes entre aplicaciones y de las claves de cookie. Nunca tokens en localStorage/sessionStorage, cookies o respuestas BFF al navegador. Las claves se inyectan al servidor, no se guardan en PostgreSQL. Cambiarlas desconecta sesiones previas; rotación sin desconexión pendiente.
 
-El contrato ejecutable de referencia está en infra/keycloak/verify.mjs; todavía no es un Guard ni protege endpoints. El provider/Guard posterior usará jose con JWKS remoto derivado **solo** del issuer configurado, no de iss/jku/x5u recibidos del cliente. Cache de claves 10 minutos, timeout 5 segundos, cooldown 30 segundos para búsquedas de kid desconocido; fallo cerrado ante errores. Planificar rotación de claves y observabilidad sin aceptar otra autoridad por conveniencia.
+### Expiración y refresh concurrente
 
-Comprobar firma RS256 exclusivamente, issuer exacto, aud que contenga innoview-api, exp/iat/sub/azp requeridos, exp y nbf cuando exista, maxTokenAge de 5 minutos y tolerancia de reloj 5 segundos. Requerir typ=Bearer de Keycloak y azp de uno de los dos clientes conocidos. Rechazar ID tokens, tokens expirados, algoritmo distinto, firma/clave desconocida o audiencia de otro recurso. Devolver solo principal issuer/sub/clientId; email o claims de roles/tenant no son autorización Core. El ID token se valida en el BFF para su cliente, no como credencial de API.
+Access token 300 segundos, code 60 segundos; sesión local absoluta ocho horas e idle treinta minutos. Transacciones login/logout y sesión anónima cinco minutos. GET /auth/session comprueba vencimiento y revocación en servidor; renovar no extiende la expiración absoluta. La pantalla técnica verifica al cargar; recargar vuelve a comprobar/renovar. No hay polling que mantenga viva una sesión sin actividad. Limpieza oportunista acotada de registros vencidos, sin tareas/infraestructura adicionales.
 
-## Verificaciones y límites de 1.1
+Refresh online rotado y single-use (revokeRefreshToken=true, maxReuse=0). Si quedan menos de treinta segundos de access token, un UPDATE condicional obtiene lease de quince segundos y versión. Competidores esperan y releen; un ganador persiste mediante comparación de lease/versión y libera. Timeout HTTP de cinco segundos. No hay BEGIN ni locks transaccionales sostenidos durante llamadas a Keycloak.
+
+Un lease vencido o refresh con resultado incierto revoca la sesión: nunca recuperar el lease reutilizando el token anterior, que pudo consumirse antes de un crash. Logout elimina la fila; una respuesta tardía no puede recrearla. La espera se acota a seis segundos y falla cerrada. Esto favorece seguridad frente a continuidad durante un fallo del proveedor/proceso; el usuario puede volver a iniciar sesión.
+
+### Logout y límites de revocación
+
+Logout local elimina inmediatamente el registro y la cookie tras validar CSRF; una copia de la cookie deja de autenticar. SSO logout elimina primero la sesión local y usa RP-initiated logout con client_id, post_logout_redirect_uri raíz registrado y state de un uso. Se omite id_token_hint: Keycloak muestra confirmación al usuario con sesión SSO, sin transmitir el ID token al navegador. Esta variante estándar queda registrada en ADR-027, sustituyendo el hint previsto en 1.1 sin cambiar clientes/redirects. Al volver a raíz la UI remite state al callback servidor; no puede reactivar sesión.
+
+Sesión IdP y sesiones locales son distintas. Logout local de Portal no cierra Control Center ni Keycloak. Logout SSO no borra al instante cookies ajenas ni revoca access tokens ya emitidos. Otras apps detectan el fallo de refresh o vencimiento; access tokens pueden conservar validez hasta cinco minutos. Backchannel logout/revocación distribuida no se implementan en 1.2; no se promete revocación instantánea global.
+
+## NestJS
+
+IdentityModule exporta AuthenticationGuard e IdentityVerifier reutilizables. GET /auth/me usa el Guard y Cache-Control:no-store. JWKS remoto derivado solo del issuer configurado, nunca de iss/jku/x5u del token. Cache diez minutos, timeout cinco segundos y cooldown treinta segundos; fallos cerrados.
+
+Verifica firma RS256, issuer exacto, aud que contenga innoview-api, exp/iat/sub/azp requeridos, expiración y nbf cuando exista, maxTokenAge cinco minutos y tolerancia de cinco segundos. Requiere typ=Bearer y azp de Portal o Control Center. Rechaza ID tokens, firmas/claves desconocidas y otros algoritmos/clientes. No convierte claims de roles, tenant, email o permisos en autoridad Core; no hay endpoints empresariales ni administración.
+
+## Preparar el entorno
+
+Seguir README para generar variables locales sin sobrescribir contraseñas previas. Nuevas: OIDC_ISSUER, AUTH_ENV/ALLOW_HTTP/API_ORIGIN, PORTAL/CONTROL_ORIGIN, DB_PORTAL/CONTROL_USER/PASSWORD y cuatro claves *_COOKIE_PASSWORD / *_TOKEN_PASSWORD. Cada clave: 32 bytes aleatorios codificados en 64 caracteres hexadecimales; credenciales distintas entre todos los roles. Nada NEXT_PUBLIC contiene secretos.
 
 ```powershell
-# Agregar TEST_KEYCLOAK_PORT=18081 y una contraseña aleatoria nueva
-# TEST_KEYCLOAK_ADMIN_PASSWORD al .env existente si aún no están.
+pnpm install --frozen-lockfile
+docker compose up -d --wait --wait-timeout 240
+pnpm db:provision
+pnpm db:run
+pnpm db:show
+pnpm oidc:provision
+pnpm oidc:check
+pnpm dev
+```
+
+db:provision funciona sobre la base existente, agrega roles/esquemas gestionados y reconcilia ACL mínimas sin borrar datos. BffSessions1792915200000 crea las dos tablas técnicas; no modifica la migración histórica. Reversión bloqueada fuera de bases descartables. Para crear una cuenta de desarrollo utilizar la consola Keycloak, realm innoview, no master: usuario habilitado, perfil requerido completo y contraseña local, sin asignar privilegios realm-management. No guardar esos datos en el repositorio ni usar administradores master para login de aplicaciones. No se implementa administración de usuarios en Innoview.
+
+Abrir http://127.0.0.1:3000 y http://127.0.0.1:3001, pulsar Iniciar sesión y autenticarse en Keycloak. Ambos muestran solo estado técnico y subject. Usar logout local o la opción SSO con confirmación IdP. El mismo usuario puede autenticar en ambas apps sin obtener autorización empresarial ni administrativa.
+
+## Librerías, verificación y pendientes
+
+openid-client **6.8.8**, iron-session **9.0.1**, jose **6.2.13**; Node **24.22.1**, Next.js **16.4.3**, NestJS **12.2.0**, TypeScript **6.0.3**. Las tres primeras tienen consumidores runtime y están verificadas: openid-client/iron-session en BFF, jose en NestJS. TypeORM/pg conservan **1.1.2/8.23.1**. Next transpila el paquete BFF y mantiene TypeORM/pg externos; driver PostgreSQL explícito para evitar require dinámico incompatible con el bundler.
+
+Verificación local de cierre: instalación congelada, lint, formato, typecheck y cuatro builds satisfactorios. pnpm test reporta 32 resultados sin fallos/omitidos: 12 PostgreSQL, 9 contrato OIDC/JWT y 11 runtime (incluyen pruebas principales que agrupan subpruebas). pnpm dev y servidores compilados respondieron HTTP 200 en las tres aplicaciones; ambos BFF emitieron cookies HttpOnly y /auth/me sin token devolvió 401. Migración aditiva aplicada/consultada en la base local existente y oidc:check correcto, sin eliminar volúmenes ni crear usuarios habituales.
+
+Correcciones verificadas: driver pg explícito/externo para Next; creación de objeto cookie nuevo después de destroy en iron-session 9; carga local con loadEnvFile antes del CLI Next para evitar --env-file dentro de NODE_OPTIONS. La prueba de code replay abre luego una sesión legítima nueva porque Keycloak puede revocar la sesión del cliente al detectar reutilización; no se debilita esa defensa para probar refresh. La entrega identifica el commit y el run de CI revisado.
+
+```powershell
 docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
 pnpm test
 docker compose -f compose.test.yaml down
+pnpm lint
+pnpm format:check
+pnpm typecheck
+pnpm build
 ```
 
-Las pruebas PostgreSQL existentes conservan su servidor independiente. Las pruebas OIDC usan Keycloak real 26.8.1 con dev-mem, sin volúmenes, administrador test_admin, contraseña aleatoria y puerto distinto del entorno normal. Esta base interna en memoria es solo un fixture efímero; desarrollo sigue usando exclusivamente PostgreSQL Identity. El test se niega a comenzar si ya hay un realm innoview o el puerto coincide con desarrollo. Los únicos usuarios y modificaciones destructivas son efímeros, creados por el test en ese servidor, y nunca se versionan.
+Pruebas reales con PostgreSQL tmpfs y Keycloak dev-mem descartables, puertos separados, test_bootstrap/test_admin y secretos aleatorios. Se exige innoview ausente antes de crear fixtures; nunca se modifican usuarios/volúmenes de desarrollo. La suite runtime crea base/roles únicos, clientes en puertos altos 13000/13001 y API 13002, arranca los tres servidores y elimina solo sus fixtures al terminar. Artefactos Next aislados en .next-runtime-test; no apuntar los TEST_* a servidores habituales. No se simulan los endpoints de Next, Nest ni Keycloak. Son pruebas HTTP de integración, no automatización visual de navegador.
 
-Se verificaron creación desde master inicializado, repetición sin escrituras, preservación de master, discovery/issuer/JWKS, S256 obligatorio, redirects/grants inválidos, Code + PKCE real para ambos clientes con usuario sintético, firma/audiencia y rechazo de ID tokens, state incorrecto, rotación de refresh/rechazo de reutilización y RP logout con URI válida/inválida. Los negativos de issuer/audiencia/algoritmo/expiración/tipo usan claves sintéticas y están identificados como tales. El verificador acepta tokens reales de Keycloak, no solo fixtures.
+Se comprueban login de ambos clientes, state/nonce/issuer incorrectos, reutilización de callback/code, CSRF/redirects, cookies HttpOnly y sellos separados, roles y cifrado, sesiones vencidas/revocadas, refresh concurrente, lease incierto, logout real local/SSO, /auth/me y 401. Tokens con audiencia incorrecta y expiración real son firmados por el IdP descartable; negativos de firma usan clave ajena y están diferenciados. Logs y respuestas se comparan con secretos/tokens generados. El contrato 1.1 mantiene sus pruebas de aprovisionamiento/discovery/JWKS/drift y criptografía sintética. No es validación de autorización organizacional ni RLS.
 
-En la instancia local se creó innoview sin usuarios reales (conteo cero), oidc:provision repetido y oidc:check pasaron, el issuer por hostname interno Docker conservó la URL canónica y los volúmenes previos permanecieron. Tras reiniciar Keycloak se compararon los IDs persistidos del realm y los tres clientes: conservaron sus valores y la verificación volvió a pasar. La ejecución local de pnpm test reportó 12 resultados PostgreSQL y 9 OIDC/JWT, cero fallos u omitidos (incluyen las pruebas principales que agrupan subpruebas). Lint, formato, tipos y los tres builds pasaron. La entrega identifica el commit y su run de Actions. El pipeline levanta PostgreSQL y Keycloak descartables con contraseñas generadas/enmascaradas, sin depender del IdP local.
+Pendientes: backchannel/revocación global inmediata, rotación de claves sin desconexión, operaciones/observabilidad y política HTTPS/IdP de producción. La persistencia de sesión no constituye UserIdentity local ni Membership. No avanzar más allá de 1.2 sin revisión.
 
-Pendientes: integración efectiva Next.js/NestJS, claves/cookies/almacenamiento de sesiones, CSRF/backchannel en las aplicaciones, política de producción y revocación distribuida. No hay Tenant, Memberships, roles empresariales, UserIdentity local ni RLS. Próximo incremento recomendado para revisión: integración runtime de Identity y sesiones sobre este contrato, antes de exponer datos organizacionales. No iniciado.
-
-## Fuentes oficiales consultadas
-
-- https://www.keycloak.org/server/hostname — hostname público fijo y backchannel.
-- https://www.keycloak.org/server/importExport — límites de imports sobre instancias existentes.
-- https://www.keycloak.org/docs-api/26.8.1/rest-api/index.html — Admin REST y representaciones de realm/clientes/scopes.
-- https://github.com/panva/openid-client/tree/v6.8.8 — requisitos ESM/Fetch/WebCrypto, PKCE, validación, refresh y logout.
-- https://github.com/panva/jose — JWKS y jwtVerify.
-- https://github.com/vvo/iron-session/tree/v9.0.1 — Node 22.13+, ESM y getIronSession con await cookies().
-- https://nextjs.org/docs/app/api-reference/functions/cookies — API asíncrona y restricciones de escritura de cookies.
+Fuentes oficiales: [openid-client](https://github.com/panva/openid-client/tree/v6.8.8), [iron-session](https://github.com/vvo/iron-session/tree/v9.0.1), [jose](https://github.com/panva/jose), [cookies Next.js](https://nextjs.org/docs/app/api-reference/functions/cookies), [NestJS Guards](https://docs.nestjs.com/guards), [Keycloak hostname](https://www.keycloak.org/server/hostname), [Admin REST 26.8.1](https://www.keycloak.org/docs-api/26.8.1/rest-api/index.html), [RP-initiated logout](https://www.keycloak.org/securing-apps/oidc-layers).

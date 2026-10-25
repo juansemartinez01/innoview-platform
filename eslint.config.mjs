@@ -10,6 +10,7 @@ export default defineConfig([
   globalIgnores([
     '**/node_modules/**',
     '**/.next/**',
+    '**/.next-runtime-test/**',
     '**/dist/**',
     '**/dist-test/**',
     '**/out/**',
@@ -23,7 +24,7 @@ export default defineConfig([
     languageOptions: { globals: globals.node },
   },
   {
-    files: ['apps/api/src/**/*.ts'],
+    files: ['apps/api/src/**/*.ts', 'packages/identity-bff/src/**/*.ts'],
     extends: [js.configs.recommended, tseslint.configs.recommendedTypeChecked],
     languageOptions: {
       globals: globals.node,

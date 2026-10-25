@@ -1,0 +1,29 @@
+{
+  "name": "@innoview/identity-bff",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./dist/handlers.js",
+    "./store": "./dist/store.js",
+    "./config": "./dist/config.js"
+  },
+  "types": "./dist/handlers.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "iron-session": "9.0.1",
+    "openid-client": "6.8.8",
+    "pg": "8.23.1",
+    "typeorm": "1.1.2",
+    "reflect-metadata": "0.2.2"
+  },
+  "peerDependencies": {
+    "next": "16.4.3"
+  },
+  "devDependencies": {
+    "@types/pg": "8.23.1"
+  }
+}

@@ -8,9 +8,16 @@ export async function provisionDatabase(
   const bootstrap = connectionConfig('bootstrap', env);
   const app = connectionConfig('app', env);
   const migrator = connectionConfig('migrator', env);
+  const portal = connectionConfig('portal', env);
+  const control = connectionConfig('control', env);
+  const configs = [bootstrap, app, migrator, portal, control];
+  const runtime = [app, portal, control];
+  const runtimeNames = runtime
+    .map((c) => pg.escapeIdentifier(c.user))
+    .join(', ');
   if (
-    new Set([bootstrap.user, app.user, migrator.user]).size !== 3 ||
-    new Set([bootstrap.password, app.password, migrator.password]).size !== 3
+    new Set(configs.map((c) => c.user)).size !== 5 ||
+    new Set(configs.map((c) => c.password)).size !== 5
   ) {
     throw new Error(
       'Bootstrap, migrator and app must use independent credentials',
@@ -32,6 +39,8 @@ export async function provisionDatabase(
     for (const [config, kind] of [
       [app, 'app'],
       [migrator, 'migrator'],
+      [portal, 'portal'],
+      [control, 'control'],
     ] as const) {
       const marker = `innoview:${bootstrap.database}:${kind}`;
       const existing = await client.query<{ marker: string | null }>(
@@ -61,8 +70,8 @@ export async function provisionDatabase(
       );
     }
     const owned = await client.query(
-      'SELECT 1 FROM pg_class WHERE relowner=(SELECT oid FROM pg_roles WHERE rolname=$1) UNION ALL SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) UNION ALL SELECT 1 FROM pg_database WHERE datdba=(SELECT oid FROM pg_roles WHERE rolname=$1)',
-      [app.user],
+      'SELECT 1 FROM pg_class WHERE relowner IN (SELECT oid FROM pg_roles WHERE rolname=ANY($1)) UNION ALL SELECT 1 FROM pg_namespace WHERE nspowner IN (SELECT oid FROM pg_roles WHERE rolname=ANY($1)) UNION ALL SELECT 1 FROM pg_database WHERE datdba IN (SELECT oid FROM pg_roles WHERE rolname=ANY($1))',
+      [runtime.map((c) => c.user)],
     );
     if (owned.rowCount)
       throw new Error('Application role must not own database objects');
@@ -73,21 +82,26 @@ export async function provisionDatabase(
     if (databaseOwner.rowCount)
       throw new Error('Migrator must not own databases');
     const outsideSchemas = await client.query(
-      "SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) AND nspname NOT IN ('foundation','platform_meta')",
+      "SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions')",
       [migrator.user],
     );
     if (outsideSchemas.rowCount)
       throw new Error('Migrator owns an unmanaged schema');
     await client.query(
-      `REVOKE ALL ON DATABASE ${q(bootstrap.database)} FROM PUBLIC, ${q(app.user)}, ${q(migrator.user)}`,
+      `REVOKE ALL ON DATABASE ${q(bootstrap.database)} FROM PUBLIC, ${runtimeNames}, ${q(migrator.user)}`,
     );
     await client.query(
-      `GRANT CONNECT ON DATABASE ${q(bootstrap.database)} TO ${q(app.user)}, ${q(migrator.user)}`,
+      `GRANT CONNECT ON DATABASE ${q(bootstrap.database)} TO ${runtimeNames}, ${q(migrator.user)}`,
     );
     await client.query(
-      `REVOKE ALL ON SCHEMA public FROM PUBLIC, ${q(app.user)}, ${q(migrator.user)}`,
+      `REVOKE ALL ON SCHEMA public FROM PUBLIC, ${runtimeNames}, ${q(migrator.user)}`,
     );
-    for (const schema of ['foundation', 'platform_meta']) {
+    for (const schema of [
+      'foundation',
+      'platform_meta',
+      'portal_sessions',
+      'control_sessions',
+    ]) {
       const owner = await client.query<{ owner: string }>(
         'SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname=$1',
         [schema],
@@ -105,41 +119,47 @@ export async function provisionDatabase(
       if (foreignOwners.rowCount)
         throw new Error('Unexpected table or sequence owner');
       await client.query(
-        `REVOKE ALL ON SCHEMA ${q(schema)} FROM PUBLIC, ${q(app.user)}`,
+        `REVOKE ALL ON SCHEMA ${q(schema)} FROM PUBLIC, ${runtimeNames}`,
       );
       await client.query(
-        `REVOKE ALL ON ALL TABLES IN SCHEMA ${q(schema)} FROM PUBLIC, ${q(app.user)}`,
+        `REVOKE ALL ON ALL TABLES IN SCHEMA ${q(schema)} FROM PUBLIC, ${runtimeNames}`,
       );
       await client.query(
-        `REVOKE ALL ON ALL SEQUENCES IN SCHEMA ${q(schema)} FROM PUBLIC, ${q(app.user)}`,
+        `REVOKE ALL ON ALL SEQUENCES IN SCHEMA ${q(schema)} FROM PUBLIC, ${runtimeNames}`,
       );
       await client.query(
-        `REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ${q(schema)} FROM PUBLIC, ${q(app.user)}`,
+        `REVOKE ALL ON ALL FUNCTIONS IN SCHEMA ${q(schema)} FROM PUBLIC, ${runtimeNames}`,
       );
       for (const objects of ['TABLES', 'SEQUENCES', 'FUNCTIONS']) {
         await client.query(
-          `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA ${q(schema)} REVOKE ALL ON ${objects} FROM PUBLIC, ${q(app.user)}`,
+          `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA ${q(schema)} REVOKE ALL ON ${objects} FROM PUBLIC, ${runtimeNames}`,
         );
       }
     }
     for (const objects of ['TABLES', 'SEQUENCES', 'FUNCTIONS']) {
       await client.query(
-        `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} REVOKE ALL ON ${objects} FROM PUBLIC, ${q(app.user)}`,
+        `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} REVOKE ALL ON ${objects} FROM PUBLIC, ${runtimeNames}`,
       );
     }
-    await client.query(`GRANT USAGE ON SCHEMA foundation TO ${q(app.user)}`);
-    await client.query(
-      `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA foundation TO ${q(app.user)}`,
-    );
-    await client.query(
-      `GRANT USAGE ON ALL SEQUENCES IN SCHEMA foundation TO ${q(app.user)}`,
-    );
-    await client.query(
-      `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA foundation GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${q(app.user)}`,
-    );
-    await client.query(
-      `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA foundation GRANT USAGE ON SEQUENCES TO ${q(app.user)}`,
-    );
+    for (const [schema, role] of [
+      ['foundation', app.user],
+      ['portal_sessions', portal.user],
+      ['control_sessions', control.user],
+    ]) {
+      await client.query(`GRANT USAGE ON SCHEMA ${q(schema)} TO ${q(role)}`);
+      await client.query(
+        `GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA ${q(schema)} TO ${q(role)}`,
+      );
+      await client.query(
+        `GRANT USAGE ON ALL SEQUENCES IN SCHEMA ${q(schema)} TO ${q(role)}`,
+      );
+      await client.query(
+        `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA ${q(schema)} GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO ${q(role)}`,
+      );
+      await client.query(
+        `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA ${q(schema)} GRANT USAGE ON SEQUENCES TO ${q(role)}`,
+      );
+    }
     await client.query('COMMIT');
   } catch {
     // Never emit PostgreSQL errors: DDL errors may contain password literals.

@@ -80,7 +80,7 @@ export async function validateMigratorConnection(
       OR has_database_privilege(current_user, current_database(), 'CREATE')
       OR has_database_privilege(current_user, current_database(), 'TEMP')
       OR (SELECT count(*) FROM pg_namespace WHERE nspname IN ('foundation','platform_meta') AND nspowner=r.oid) <> 2
-      OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=r.oid AND nspname NOT IN ('foundation','platform_meta'))
+      OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=r.oid AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions'))
     ) AS unsafe FROM pg_roles r WHERE rolname = current_user`);
     if (!role || role.unsafe) throw new Error('Unsafe migration role');
   } catch {

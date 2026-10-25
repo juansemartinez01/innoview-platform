@@ -19,3 +19,5 @@ build/
 Thumbs.db
 next-env.d.ts
 dist-test/
+
+.next-runtime-test/

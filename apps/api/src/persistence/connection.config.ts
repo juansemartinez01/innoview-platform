@@ -1,5 +1,6 @@
 export type Environment = Readonly<Record<string, string | undefined>>;
-export type DatabasePurpose = 'app' | 'migrator' | 'bootstrap';
+export type DatabasePurpose =
+  'app' | 'migrator' | 'bootstrap' | 'portal' | 'control';
 
 export interface ConnectionConfig {
   host: string;

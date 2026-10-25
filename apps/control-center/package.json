@@ -3,15 +3,16 @@
   "version": "0.0.0",
   "private": true,
   "scripts": {
-    "dev": "next dev --hostname 127.0.0.1 --port 3001",
+    "dev": "node ../../infra/identity/next.mjs control-center dev",
     "build": "next build",
-    "start": "next start --hostname 127.0.0.1 --port 3001",
+    "start": "node ../../infra/identity/next.mjs control-center start",
     "typecheck": "next typegen && tsc --noEmit"
   },
   "dependencies": {
     "next": "16.4.3",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "@innoview/identity-bff": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "19.3.0",

@@ -2,7 +2,7 @@
 
 Fecha: 2026-10-25. Las ADR vigentes no cambian. Este documento propone contratos y orden de trabajo para revisión después de cerrar Fase 0; no autoriza implementación automática.
 
-Actualización 1.1: Fase 0 oficialmente aprobada y contrato/configuración OIDC implementado en OIDC.md (ADR-025/026). Las propuestas siguientes son preparación de módulos posteriores, no código implementado. Recomendación a revisar para 1.2: integración runtime de Identity y sesiones antes de exponer datos organizacionales; no se avanza sin autorización.
+Actualización 1.2: 1.1 aprobado y runtime de autenticación/sesiones implementado según OIDC.md (ADR-025/026/027), pendiente revisión. Este documento conserva el análisis original de módulos; su numeración histórica queda sustituida por IMPLEMENTATION_PLAN.md: 1.2 runtime, 1.3 Identity local, 1.4 Organizations, 1.5 Memberships y 1.6 contexto. Ninguna entidad empresarial está implementada; no se avanza sin autorización.
 
 ## Dependencias y responsabilidades
 
