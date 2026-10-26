@@ -1,3 +1,4 @@
+import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { TestContext } from 'node:test';
@@ -33,12 +34,14 @@ export async function verifyMembershipRls(
   env: Environment,
 ) {
   const operator = await initializeMembershipOperatorDataSource(env);
+  const organizationOperator =
+    await initializeOrganizationsOperatorDataSource(env);
   const single = createDataSource('app', env);
   single.setOptions({ poolSize: 1 });
   await single.initialize();
   try {
     const identities = new IdentityService(app);
-    const organizations = new OrganizationsService(app);
+    const organizations = new OrganizationsService(organizationOperator);
     const writes = new MembershipsService(operator);
     const reads = new MembershipsService(app);
     const scoped = new IdentityReadTransactions(app, identities);
@@ -162,9 +165,9 @@ export async function verifyMembershipRls(
           'FORCE also subjects the table owner to default deny',
         );
         const business = await migrator.query<{ relrowsecurity: boolean }[]>(
-          "SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='organizations' AND c.relkind='r'",
+          "SELECT relrowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='organizations' AND c.relkind='r' AND c.relname<>'audit_event'",
         );
-        assert.ok(business.every((r) => !r.relrowsecurity));
+        assert.ok(business.every((r) => r.relrowsecurity));
         const definers = await migrator.query<{ present: number }[]>(
           "SELECT 1 FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='memberships' AND p.prosecdef",
         );
@@ -464,6 +467,7 @@ export async function verifyMembershipRls(
     );
   } finally {
     await single.destroy();
+    await organizationOperator.destroy();
     await operator.destroy();
   }
 }

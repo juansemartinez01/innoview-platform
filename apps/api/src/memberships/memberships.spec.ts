@@ -1,3 +1,4 @@
+import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -45,10 +46,12 @@ export async function verifyMemberships(
   env: Environment,
 ) {
   const operator = await initializeMembershipOperatorDataSource(env);
+  const organizationOperator =
+    await initializeOrganizationsOperatorDataSource(env);
   try {
     const writes = new MembershipsService(operator);
     const reads = new MembershipsService(app);
-    const organizations = new OrganizationsService(app);
+    const organizations = new OrganizationsService(organizationOperator);
     const identities = new IdentityService(app);
     const tenantA = (
       await organizations.createTenant('Membership fixture A', 'Group A')
@@ -505,10 +508,7 @@ export async function verifyMemberships(
     await t.test(
       'Memberships: cross-domain FK RESTRICT and future tenant-composite references are enforced by PostgreSQL',
       async () => {
-        for (const sql of [
-          'DELETE FROM organizations.tenant WHERE id=$1',
-          'DELETE FROM identity.user_identity WHERE id=$1',
-        ]) {
+        for (const sql of ['DELETE FROM identity.user_identity WHERE id=$1']) {
           await assert.rejects(
             migrator.query(sql, [
               sql.includes('organizations') ? tenantB : identityA,
@@ -654,6 +654,7 @@ export async function verifyMemberships(
       },
     );
   } finally {
+    await organizationOperator.destroy();
     await operator.destroy();
   }
 }

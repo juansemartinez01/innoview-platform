@@ -1,6 +1,6 @@
 # Identity — contrato OIDC y runtime BFF
 
-Fase 1 aprobada/cerrada en b04cd26/e2aaf61; contrato OIDC v2 vigente. 2.1 deriva UUID interno del Principal ya validado para contexto SQL LOCAL y RLS de Memberships, sin cambiar issuer, audiencias, clientes, scopes, tokens o sesiones. Control Center permanece técnico. No hay RBAC, contexto tenant definitivo ni RLS Organizations. README/ADR-035 fijan el modelo de confianza: el GUC no valida JWT ni resiste SQL arbitrario.
+Contrato OIDC v2 sin cambios. Fases 0/1 cerradas, 2.1 aprobado y 2.2 pendiente de revisión: contexto identidad/tenant LOCAL y RLS Memberships/Organizations (ADR-035/036). No hay RBAC; los GUC no autentican ni resisten SQL arbitrario. Sesiones y selector conservados.
 
 ## Autoridad, clientes y scopes
 

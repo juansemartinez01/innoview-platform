@@ -1,3 +1,4 @@
+import type { EntityManager } from 'typeorm';
 import {
   BadRequestException,
   Body,
@@ -29,12 +30,65 @@ import { MembershipsService } from '../memberships/memberships.service.js';
 import { OrganizationsModule } from '../organizations/organizations.module.js';
 import { OrganizationsService } from '../organizations/organizations.service.js';
 
+export type ContextOption = {
+  id: string;
+  name: string;
+  group: { id: string; name: string };
+};
+
+@Injectable()
+export class TenantReadTransactions {
+  constructor(
+    private readonly identities: IdentityReadTransactions,
+    private readonly memberships: MembershipsService,
+    private readonly organizations: OrganizationsService,
+  ) {}
+  // Trusted backend only: AuthenticationGuard supplies Principal. This scope
+  // validates membership, not future company/branch permissions. No HTTP here.
+  async read<T>(
+    principal: Principal,
+    candidate: string,
+    operation: (
+      manager: EntityManager,
+      option: ContextOption,
+    ) => Promise<T> | T,
+  ): Promise<T> {
+    if (
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(
+        candidate,
+      )
+    )
+      throw new NotFoundException('Context unavailable');
+    const result = await this.identities.read(
+      principal,
+      async (manager, identityId) => {
+        const refs = await this.memberships.activeTenantReferences(
+          identityId,
+          manager,
+        );
+        const [option] = await this.organizations.availableContextSummaries(
+          refs.filter((id) => id === candidate),
+          manager,
+        );
+        if (!option) throw new NotFoundException('Context unavailable');
+        await manager.query("SELECT set_config('innoview.tenant_id',$1,true)", [
+          option.id,
+        ]);
+        return { value: await operation(manager, option) };
+      },
+    );
+    if (!result) throw new NotFoundException('Context unavailable');
+    return result.value;
+  }
+}
+
 @Injectable()
 export class ContextService {
   constructor(
     private readonly identityTransactions: IdentityReadTransactions,
     private readonly memberships: MembershipsService,
     private readonly organizations: OrganizationsService,
+    private readonly tenants: TenantReadTransactions,
   ) {}
 
   async options(principal: Principal, candidate?: string) {
@@ -63,10 +117,16 @@ export class ContextService {
     }
   }
   async validate(principal: Principal, tenantId: string) {
-    const [option] = await this.options(principal, tenantId);
-    // Same response for foreign, missing, revoked, inactive and archived.
-    if (!option) throw new NotFoundException('Context unavailable');
-    return option;
+    try {
+      return await this.tenants.read(
+        principal,
+        tenantId,
+        (_manager, option) => option,
+      );
+    } catch (error) {
+      if (error instanceof NotFoundException) throw error;
+      throw new ServiceUnavailableException('Context verification unavailable');
+    }
   }
 }
 
@@ -122,7 +182,8 @@ export class ContextController {
     MembershipsModule,
     OrganizationsModule,
   ],
-  providers: [ContextService],
+  providers: [ContextService, TenantReadTransactions],
+  exports: [TenantReadTransactions],
   controllers: [ContextController],
 })
 export class ContextModule {}

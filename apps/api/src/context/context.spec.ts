@@ -1,3 +1,4 @@
+import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { TestContext } from 'node:test';
@@ -10,7 +11,7 @@ import { MembershipsService } from '../memberships/memberships.service.js';
 import { OrganizationsService } from '../organizations/organizations.service.js';
 import { initializeMembershipOperatorDataSource } from '../persistence/data-sources.js';
 import type { Environment } from '../persistence/connection.config.js';
-import { ContextService } from './context.module.js';
+import { ContextService, TenantReadTransactions } from './context.module.js';
 
 export async function verifyContextPersistence(
   t: TestContext,
@@ -18,16 +19,23 @@ export async function verifyContextPersistence(
   env: Environment,
 ) {
   const operator = await initializeMembershipOperatorDataSource(env);
+  const organizationOperator =
+    await initializeOrganizationsOperatorDataSource(env);
   try {
     const identities = new IdentityService(app);
     const memberships = new MembershipsService(app);
     const trusted = new MembershipsService(operator);
-    const organizations = new OrganizationsService(app);
+    const organizations = new OrganizationsService(organizationOperator);
     const transactions = new IdentityReadTransactions(app, identities);
     const contexts = new ContextService(
       transactions,
       memberships,
-      organizations,
+      new OrganizationsService(app),
+      new TenantReadTransactions(
+        transactions,
+        memberships,
+        new OrganizationsService(app),
+      ),
     );
     const principal = {
       issuer: 'https://context-fixture.invalid',
@@ -68,8 +76,12 @@ export async function verifyContextPersistence(
           // A READ COMMITTED query here would mix the new organization state with
           // the old membership list. Both contracts must keep the supplied snapshot.
           assert.equal(
-            (await organizations.availableContextSummaries(refs, manager))
-              .length,
+            (
+              await new OrganizationsService(app).availableContextSummaries(
+                refs,
+                manager,
+              )
+            ).length,
             2,
           );
           assert.equal(
@@ -133,6 +145,7 @@ export async function verifyContextPersistence(
       },
     );
   } finally {
+    await organizationOperator.destroy();
     await operator.destroy();
   }
 }

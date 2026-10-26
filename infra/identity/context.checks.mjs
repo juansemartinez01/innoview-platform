@@ -22,8 +22,11 @@ export async function verifyContext(t, h) {
     userPassword,
     sensitive,
   } = h;
-  const { createDataSource, initializeMembershipOperatorDataSource } =
-    await import('../../apps/api/dist/persistence/data-sources.js');
+  const {
+    createDataSource,
+    initializeMembershipOperatorDataSource,
+    initializeOrganizationsOperatorDataSource,
+  } = await import('../../apps/api/dist/persistence/data-sources.js');
   const { OrganizationsService } =
     await import('../../apps/api/dist/organizations/organizations.service.js');
   const { MembershipsService } =
@@ -31,7 +34,9 @@ export async function verifyContext(t, h) {
   const source = createDataSource('app', env);
   await source.initialize();
   const operator = await initializeMembershipOperatorDataSource(env);
-  const organization = new OrganizationsService(source);
+  const organizationOperator =
+    await initializeOrganizationsOperatorDataSource(env);
+  const organization = new OrganizationsService(organizationOperator);
   const membership = new MembershipsService(operator);
   const browsers = [];
   const operation = () => ({
@@ -530,6 +535,7 @@ export async function verifyContext(t, h) {
     h.portal.responses.push(
       ...browsers.flatMap((browser) => browser.responses),
     );
+    await organizationOperator.destroy();
     await operator.destroy();
     await source.destroy();
   }

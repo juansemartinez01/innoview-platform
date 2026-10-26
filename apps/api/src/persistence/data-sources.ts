@@ -8,7 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { connectionConfig, type Environment } from './connection.config.js';
 
 export function createDataSource(
-  purpose: 'app' | 'migrator' | 'membership',
+  purpose: 'app' | 'migrator' | 'membership' | 'organizations',
   env: Environment = process.env,
 ): DataSource {
   const config = connectionConfig(purpose, env);
@@ -24,11 +24,13 @@ export function createDataSource(
     ssl: config.ssl,
     connectTimeoutMS: config.connectionTimeoutMillis,
     schema:
-      purpose === 'membership'
-        ? 'memberships'
-        : purpose === 'app'
-          ? 'foundation'
-          : 'platform_meta',
+      purpose === 'organizations'
+        ? 'organizations'
+        : purpose === 'membership'
+          ? 'memberships'
+          : purpose === 'app'
+            ? 'foundation'
+            : 'platform_meta',
     synchronize: false,
     migrationsRun: false,
     migrationsTransactionMode: 'all',
@@ -53,7 +55,7 @@ export function createDataSource(
 }
 
 async function initializeRestrictedDataSource(
-  purpose: 'app' | 'membership',
+  purpose: 'app' | 'membership' | 'organizations',
   env: Environment = process.env,
 ): Promise<DataSource> {
   const source = createDataSource(purpose, env);
@@ -75,9 +77,7 @@ async function initializeRestrictedDataSource(
       OR has_database_privilege(current_user, current_database(), 'TEMP')
       OR EXISTS (SELECT 1 FROM pg_namespace WHERE has_schema_privilege(current_user, oid, 'CREATE'))
     ) AS unsafe FROM pg_roles r WHERE rolname = current_user`,
-      [
-        `innoview:${String(source.options.database)}:${purpose === 'app' ? 'app' : 'membership'}`,
-      ],
+      [`innoview:${String(source.options.database)}:${purpose}`],
     );
     if (!role || role.unsafe)
       throw new Error('Unsafe application database role');
@@ -99,6 +99,12 @@ export function initializeMembershipOperatorDataSource(
   env: Environment = process.env,
 ): Promise<DataSource> {
   return initializeRestrictedDataSource('membership', env);
+}
+
+export function initializeOrganizationsOperatorDataSource(
+  env: Environment = process.env,
+): Promise<DataSource> {
+  return initializeRestrictedDataSource('organizations', env);
 }
 
 export async function validateMigratorConnection(

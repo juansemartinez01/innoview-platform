@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { hostname, userInfo } from 'node:os';
 import { Inject, Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
 import {
@@ -31,34 +33,12 @@ export class OrganizationsService {
     )
       throw new Error('Active local transaction required');
     if (!tenantIds.length) return [];
-    const rows = await manager
-      .getRepository(Tenant)
-      .createQueryBuilder('tenant')
-      .innerJoin(
-        BusinessGroup,
-        'groupRecord',
-        'groupRecord.tenant_id=tenant.id',
-      )
-      .innerJoin(
-        OrganizationalUnit,
-        'groupUnit',
-        "groupUnit.tenant_id=tenant.id AND groupUnit.id=groupRecord.id AND groupUnit.type='GROUP' AND groupUnit.status='ACTIVE'",
-      )
-      .where("tenant.id IN (:...tenantIds) AND tenant.status='ACTIVE'", {
-        tenantIds,
-      })
-      .select('tenant.id', 'id')
-      .addSelect('tenant.name', 'name')
-      .addSelect('groupUnit.id', 'group_id')
-      .addSelect('groupUnit.name', 'group_name')
-      .orderBy('tenant.name', 'ASC')
-      .addOrderBy('tenant.id', 'ASC')
-      .getRawMany<{
-        id: string;
-        name: string;
-        group_id: string;
-        group_name: string;
-      }>();
+    const rows = await manager.query<
+      { id: string; name: string; group_id: string; group_name: string }[]
+    >(
+      `SELECT tenant_id AS id,tenant_name AS name,group_id,group_name FROM organizations.tenant_directory WHERE tenant_id=ANY($1::uuid[]) AND available ORDER BY tenant_name,tenant_id`,
+      [tenantIds],
+    );
     return rows.map((row) => ({
       id: row.id,
       name: row.name,
@@ -75,7 +55,17 @@ export class OrganizationsService {
     operation: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
     try {
-      return await this.source.transaction(operation);
+      return await this.source.transaction(async (manager) => {
+        const [role] = await manager.query<{ trusted: boolean }[]>(
+          "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':organizations' AS trusted FROM pg_roles WHERE rolname=current_user",
+        );
+        if (!role?.trusted) throw new OrganizationOperationError();
+        await manager.query(
+          "SELECT set_config('innoview.organization_actor',$1,true),set_config('innoview.organization_request',$2,true)",
+          [`${hostname()}:${userInfo().username}`, randomUUID()],
+        );
+        return operation(manager);
+      });
     } catch {
       throw new OrganizationOperationError();
     }
@@ -205,10 +195,16 @@ export class OrganizationsService {
     });
   }
 
-  // Internal persistence contract, NOT an authorization boundary. Explicit
-  // tenant filters will need membership validation and RLS before exposure.
-  async getStructure(tenantId: string) {
-    return this.source.transaction('REPEATABLE READ', async (manager) => {
+  // Internal read contract. API consumers must supply the validated tenant scope;
+  // membership and RLS do not replace future business permission checks.
+  async getStructure(tenantId: string, manager?: EntityManager) {
+    if (
+      manager &&
+      (manager.connection !== this.source ||
+        !manager.queryRunner?.isTransactionActive)
+    )
+      throw new Error('Active local transaction required');
+    const read = async (manager: EntityManager) => {
       const tenant = await manager.findOneByOrFail(Tenant, { id: tenantId });
       const group = await manager.findOneByOrFail(BusinessGroup, { tenantId });
       const companies = await manager.findBy(Company, { tenantId });
@@ -228,6 +224,9 @@ export class OrganizationsService {
           parentId: parents.get(unit.id) ?? null,
         })),
       };
-    });
+    };
+    return manager
+      ? read(manager)
+      : this.source.transaction('REPEATABLE READ', read);
   }
 }

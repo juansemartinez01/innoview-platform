@@ -4,7 +4,7 @@ Fecha de selección: 2026-10-24. No se cambia el stack acordado.
 
 ## Estado de cierre — 2026-10-25
 
-Fase 0 oficialmente cerrada en c069a9a. Fase 1 aprobada/cerrada tras revisar b04cd26/e2aaf61; 2.1 incorpora contexto de identidad LOCAL y RLS Memberships, pendiente revisión (ADR-035 y README). Sin autorización empresarial ni RLS Organizations. Hay siete migraciones; el rol operativo de Memberships usa credenciales independientes y la API solo consulta pertenencias propias bajo RLS. Actualizar código/migración coordinadamente conservando `.env` y volúmenes; instrucciones de bootstrap explícito en README. La evidencia siguiente es el cierre histórico de Foundation, no el estado actual de sus esquemas: privilegios y verificaciones recientes están en README, DATA_MODEL y OIDC.
+Fases 0/1 cerradas; 2.1 aprobado en 55a1b29. 2.2 implementa contexto tenant/RLS Organizations y operador independiente (ADR-036), pendiente de revisión. Ocho migraciones. Sin RBAC. Este documento conserva evidencia histórica; operación actual en README.
 
 | Incremento                   | Estado y evidencia                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------ |

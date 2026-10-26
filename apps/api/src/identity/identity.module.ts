@@ -102,7 +102,7 @@ export class IdentityReadTransactions {
       // A clean local scope also protects the initial lookup from any inherited
       // setting. Trusted application code never uses session-level SET here.
       await manager.query(
-        "SELECT set_config('innoview.user_identity_id','',true)",
+        "SELECT set_config('innoview.user_identity_id','',true), set_config('innoview.tenant_id','',true)",
       );
       if (
         !principal ||

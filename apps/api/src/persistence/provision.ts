@@ -11,14 +11,23 @@ export async function provisionDatabase(
   const portal = connectionConfig('portal', env);
   const control = connectionConfig('control', env);
   const membership = connectionConfig('membership', env);
-  const configs = [bootstrap, app, migrator, portal, control, membership];
-  const runtime = [app, portal, control, membership];
+  const organizations = connectionConfig('organizations', env);
+  const configs = [
+    bootstrap,
+    app,
+    migrator,
+    portal,
+    control,
+    membership,
+    organizations,
+  ];
+  const runtime = [app, portal, control, membership, organizations];
   const runtimeNames = runtime
     .map((c) => pg.escapeIdentifier(c.user))
     .join(', ');
   if (
-    new Set(configs.map((c) => c.user)).size !== 6 ||
-    new Set(configs.map((c) => c.password)).size !== 6
+    new Set(configs.map((c) => c.user)).size !== 7 ||
+    new Set(configs.map((c) => c.password)).size !== 7
   ) {
     throw new Error(
       'Bootstrap, migrator and app must use independent credentials',
@@ -43,6 +52,7 @@ export async function provisionDatabase(
       [portal, 'portal'],
       [control, 'control'],
       [membership, 'membership'],
+      [organizations, 'organizations'],
     ] as const) {
       const marker = `innoview:${bootstrap.database}:${kind}`;
       const existing = await client.query<{ marker: string | null }>(
@@ -186,21 +196,41 @@ export async function provisionDatabase(
       await client.query(
         `REVOKE ALL (${row.columns.map(q).join(',')}) ON TABLE ${q(row.schema_name)}.${q(row.table_name)} FROM PUBLIC, ${runtimeNames}`,
       );
-    await client.query(`GRANT USAGE ON SCHEMA organizations TO ${q(app.user)}`);
     await client.query(
-      `GRANT SELECT, INSERT ON ALL TABLES IN SCHEMA organizations TO ${q(app.user)}`,
+      `GRANT USAGE ON SCHEMA organizations TO ${q(app.user)}, ${q(organizations.user)}`,
     );
-    await client.query(
-      `ALTER DEFAULT PRIVILEGES FOR ROLE ${q(migrator.user)} IN SCHEMA organizations GRANT SELECT, INSERT ON TABLES TO ${q(app.user)}`,
-    );
-    for (const table of ['tenant', 'organizational_unit']) {
+    // Exact existing objects only. No broad default grants to future tables/columns.
+    for (const table of [
+      'tenant',
+      'organizational_unit',
+      'business_group',
+      'company',
+      'branch',
+      'tenant_directory',
+      'audit_event',
+    ]) {
       const found = await client.query<{ exists: boolean }>(
         'SELECT to_regclass($1) IS NOT NULL AS exists',
         [`organizations.${table}`],
       );
-      if (found.rows[0]?.exists)
+      if (!found.rows[0]?.exists) continue;
+      await client.query(
+        `GRANT SELECT, INSERT ON organizations.${q(table)} TO ${q(organizations.user)}`,
+      );
+      if (['tenant', 'organizational_unit'].includes(table))
         await client.query(
-          `GRANT UPDATE(status,updated_at) ON organizations.${q(table)} TO ${q(app.user)}`,
+          `GRANT UPDATE(status,updated_at) ON organizations.${q(table)} TO ${q(organizations.user)}`,
+        );
+      if (table === 'tenant_directory') {
+        await client.query(
+          `GRANT UPDATE ON organizations.tenant_directory TO ${q(organizations.user)}`,
+        );
+        await client.query(
+          `GRANT SELECT(tenant_id,tenant_name,group_id,group_name,available) ON organizations.tenant_directory TO ${q(app.user)}`,
+        );
+      } else if (table !== 'audit_event')
+        await client.query(
+          `GRANT SELECT ON organizations.${q(table)} TO ${q(app.user)}`,
         );
     }
     await client.query(

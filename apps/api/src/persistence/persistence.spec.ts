@@ -1,3 +1,7 @@
+import { readdirSync } from 'node:fs';
+import { OrganizationsService } from '../organizations/organizations.service.js';
+import { initializeOrganizationsOperatorDataSource } from './data-sources.js';
+import { verifyOrganizationsRls } from '../organizations/organizations-rls.spec.js';
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
@@ -62,6 +66,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     DB_CONTROL_PASSWORD: randomBytes(24).toString('hex'),
     DB_MEMBERSHIP_USER: `test_membership_${suffix}`,
     DB_MEMBERSHIP_PASSWORD: randomBytes(24).toString('hex'),
+    DB_ORGANIZATIONS_USER: `test_organizations_${suffix}`,
+    DB_ORGANIZATIONS_PASSWORD: randomBytes(24).toString('hex'),
     DB_MIGRATOR_PASSWORD: randomBytes(24).toString('hex'),
   };
   const app = createDataSource('app', env);
@@ -151,7 +157,77 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await t.test(
       'migrator applies the real migration and owns the technical table',
       async () => {
-        assert.equal((await migrator.runMigrations()).length, 7);
+        const legacy = createDataSource('migrator', env);
+        const folder = new URL('./migrations/', import.meta.url);
+        legacy.setOptions({
+          migrations: readdirSync(folder)
+            .filter(
+              (name) =>
+                name.endsWith('.js') &&
+                !name.includes('OrganizationsTenantRls'),
+            )
+            .map((name) =>
+              fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
+            ),
+        });
+        await legacy.initialize();
+        try {
+          assert.equal((await legacy.runMigrations()).length, 7);
+        } finally {
+          await legacy.destroy();
+        }
+        await provisionDatabase(env);
+        const operator = await initializeOrganizationsOperatorDataSource(env);
+        try {
+          const service = new OrganizationsService(operator);
+          const existing = await service.createTenant(
+            'Pre-upgrade tenant',
+            'Pre-upgrade group',
+          );
+          const company = await service.createCompany(
+            existing.tenant.id,
+            existing.group.id,
+            'Pre-upgrade company',
+            'SYNTHETIC',
+          );
+          await service.createBranch(
+            existing.tenant.id,
+            company.company.id,
+            'Pre-upgrade branch',
+          );
+          assert.equal((await migrator.runMigrations()).length, 1);
+          assert.equal(
+            (await service.getStructure(existing.tenant.id)).branches.length,
+            1,
+          );
+          const [directory] = await operator.query<
+            { tenant_name: string; available: boolean }[]
+          >(
+            'SELECT tenant_name,available FROM organizations.tenant_directory WHERE tenant_id=$1',
+            [existing.tenant.id],
+          );
+          assert.deepEqual(directory, {
+            tenant_name: 'Pre-upgrade tenant',
+            available: true,
+          });
+          assert.deepEqual(
+            await operator.query(
+              'SELECT id FROM organizations.audit_event WHERE tenant_id=$1',
+              [existing.tenant.id],
+            ),
+            [],
+          );
+        } finally {
+          await operator.destroy();
+        }
+        assert.equal(
+          (
+            await migrator.query<{ n: number }[]>(
+              'SELECT count(*)::int AS n FROM platform_meta.migrations',
+            )
+          )[0].n,
+          8,
+        );
         assert.equal(await migrator.showMigrations(), false);
         const [owner] = await migrator.query<{ owner: string }[]>(
           "SELECT pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid='foundation.persistence_probe'::regclass",
@@ -446,11 +522,35 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await verifyMemberships(t, app, migrator, env);
     await verifyContextPersistence(t, app, env);
     await verifyMembershipRls(t, app, migrator, env);
+    await verifyOrganizationsRls(t, app, migrator, env);
 
     await t.test(
       'real migration reverts and reapplies only in this disposable database',
       async () => {
         assert.match(database, /^innoview_test_[a-f0-9]{32}$/);
+        const revertOrganizationsRls = spawnSync(
+          process.execPath,
+          [
+            fileURLToPath(new URL('./migration.cli.js', import.meta.url)),
+            'revert',
+          ],
+          {
+            env: { ...process.env, ...env, DB_DISPOSABLE: 'true' },
+            encoding: 'utf8',
+            windowsHide: true,
+          },
+        );
+        assert.equal(
+          revertOrganizationsRls.status,
+          0,
+          revertOrganizationsRls.stderr,
+        );
+        const [organizationRls] = await migrator.query<
+          { relrowsecurity: boolean }[]
+        >(
+          "SELECT relrowsecurity FROM pg_class WHERE oid='organizations.tenant'::regclass",
+        );
+        assert.equal(organizationRls.relrowsecurity, false);
         const revertRls = spawnSync(
           process.execPath,
           [
@@ -599,6 +699,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
           env.DB_PORTAL_USER!,
           env.DB_CONTROL_USER!,
           env.DB_MEMBERSHIP_USER!,
+          env.DB_ORGANIZATIONS_USER!,
         ])
           await bootstrap.query(
             `DROP ROLE IF EXISTS ${pg.escapeIdentifier(role)}`,

@@ -1,6 +1,45 @@
 # Innoview Platform
 
-Fases 0 y 1 oficialmente cerradas; 1.6 aprobado en b04cd26/e2aaf61. Incremento 2.1: contexto transaccional de identidad y RLS de Memberships implementados, pendientes de revisión. Fuente de verdad: AGENTS.md y docs/. Sin RLS Organizations, contexto tenant definitivo, RBAC ni administración pública de membresías.
+Fases 0 y 1 oficialmente cerradas. 2.1 aprobado en 55a1b29. Incremento 2.2: contexto transaccional de tenant y RLS Organizations implementados, pendientes de revisión. Fuente de verdad: AGENTS.md y docs/. Sin RBAC, permisos empresariales ni administración pública de organizaciones/membresías. Las secciones de incrementos anteriores conservan su contexto histórico; ADR-036 y la sección siguiente describen los permisos vigentes.
+
+## Contexto tenant y RLS Organizations — 2.2
+
+Para actualizar una base existente, conservar `.env`, sesiones y volúmenes. Detener las aplicaciones antes del cambio coordinado de código y políticas. Agregar únicamente `DB_ORGANIZATIONS_USER=innoview_organizations_operator` y `DB_ORGANIZATIONS_PASSWORD` con una contraseña aleatoria nueva e independiente (32 bytes hex recomendados; mínimo 16 caracteres). No imprimirla ni reutilizar contraseñas de otros roles.
+
+```powershell
+pnpm install --frozen-lockfile
+docker compose up -d --wait --wait-timeout 240
+pnpm db:provision
+pnpm db:run
+pnpm db:provision
+pnpm db:show
+pnpm dev
+```
+
+El primer aprovisionamiento incorpora el operador; la octava migración OrganizationsTenantRls1793016000000 conserva datos, crea un directorio derivado mínimo y auditoría técnica, retira escrituras API y activa ENABLE/FORCE RLS. El segundo reconcilia grants exactos sobre objetos nuevos. No requiere revertir ni deshabilitar RLS, recrear bases o iniciar sesión nuevamente. No mezclar procesos antiguos con políticas nuevas: fallarán cerrados. Un clon limpio utiliza el inicio habitual y aplica las ocho migraciones.
+
+Pretenant: `GET /context/options` mantiene `{ options: [{ id, name, group: { id, name } }] }`. Solo membresías ACTIVE propias, Tenant ACTIVE y OU GROUP ACTIVE. IdentityReadTransactions deriva UUID del Principal JWT validado, limpia ambos contextos LOCAL y establece identidad en una transacción read-only. Organizations consulta únicamente `tenant_directory`; API tiene SELECT por columna de tenant_id/tenant_name/group_id/group_name/available, con RLS por pertenencia propia. Una columna nueva no recibe acceso automático. Sin tenant contextual no se leen las tablas privadas, tampoco mediante joins con el directorio.
+
+Tenant validado: `POST /context/validate`, body exacto `{ "tenantId": "UUID" }`, devuelve esa opción mínima o 404 uniforme. TenantReadTransactions verifica pertenencia y disponibilidad en el mismo snapshot, fija `innoview.tenant_id` LOCAL y entrega el mismo EntityManager al consumidor backend. No recibe user_identity_id ni hace HTTP dentro de SQL. Las cinco tablas privadas exigen tenant contextual coincidente y directorio disponible propio; límites RESTRICTIVE impiden ampliación por otra política permisiva. Contexto ausente/malformado/ajeno falla cerrado sin casts de GUC a UUID. Ambos contextos desaparecen con commit/rollback. La preferencia del Portal y Control Center no cambian; no hay endpoints de compañías/sucursales.
+
+| Actor                       | Organizations: permisos efectivos                                                                                                                                                                                                                        |
+| --------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| API                         | SELECT privado sujeto a identidad, pertenencia ACTIVE y tenant LOCAL; directorio mínimo por columnas y pertenencia. Sin INSERT/UPDATE/DELETE, auditoría, DDL, ownership, SUPERUSER o BYPASSRLS                                                           |
+| Operador Organizations      | SELECT/INSERT de los siete objetos exactos; UPDATE(status,updated_at) en Tenant/OU y actualización derivada del directorio. Políticas propias, contexto técnico obligatorio, sin DELETE/DDL/ownership/roles elevados ni tablas privadas de otros módulos |
+| Operador Memberships        | Sin acceso Organizations; FK existentes, bootstrap, revocación terminal y auditoría conservados con sus políticas propias                                                                                                                                |
+| BFF Portal / Control Center | Solo sus sesiones, sin credenciales operativas ni acceso Organizations                                                                                                                                                                                   |
+| Migrador                    | Dueño DDL, sujeto a FORCE para DML sin política; actor confiable capaz de modificar políticas. Nunca runtime                                                                                                                                             |
+| Bootstrap                   | Solo aprovisionamiento controlado; nunca API, selector ni consultas normales                                                                                                                                                                             |
+
+Operación interna confiable: el operador técnico Innoview ejecuta un proceso separado que obtiene `initializeOrganizationsOperatorDataSource` y utiliza `OrganizationsService` (createTenant/createCompany/createBranch/setStatus/getStructure). No son funciones HTTP ni administración delegada. Entregar al proceso operativo solo DB_HOST/PORT/NAME/SSL y DB_ORGANIZATIONS_USER/PASSWORD; no requiere bootstrap/migrador. El provider Nest sigue usando DB_APP y rechaza escrituras. Las pruebas ejercitan ese mismo contrato con credenciales descartables.
+
+Cada escritura interna fija actor técnico host:usuario y UUID de request LOCAL. Los triggers invocantes registran INSERT/STATUS_CHANGED con actor DB, referencia y estados en audit_event; cambios y eventos se confirman juntos. No se registran contraseñas ni perfiles, ni se inventa historial anterior a la migración. No se permite insertar auditoría ni editar directorio directamente. Triggers diferidos sincronizan su disponibilidad en el mismo commit, respetando integridad/FK/estados previos. Un estado repetido no duplica eventos. Atribución OS/credencial técnica no equivale a identidad empresarial o firma criptográfica.
+
+Los launchers excluyen también DB_ORGANIZATIONS_* de API y BFF; dev/start, guard de arranque y descendientes se verifican con las variables completas de la fixture. No inyectar esos secretos al runtime desplegado. Las herramientas operativas pueden leer `.env` local pero sus secretos nunca pasan al servidor HTTP.
+
+Validación: `docker compose -f compose.test.yaml up -d --wait --wait-timeout 180`, `pnpm test`, `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm build`; luego `docker compose -f compose.test.yaml down` sin `--volumes`. Resultado local 2.2: **99 resultados aprobados (55 PostgreSQL + 44 entorno/OIDC/runtime/Chromium), cero fallos**. Las pruebas agregan SQL sin filtros/joins, tres tenants y dos identidades más una vacía, límites de columnas, pool físico único, concurrencia, estados/revocación, auditoría/ACL y upgrade de datos existentes. Continúan Keycloak, Chromium y bootstrap. Solo se revierten bases generadas por las pruebas. `pnpm db:generate src/persistence/migrations/SchemaCheck --check` verifica que metadata y esquema coincidan, sin generar archivos.
+
+**Límites:** contexto y RLS no conceden permisos sobre compañías/sucursales. No hay RBAC ni Guards empresariales. Una transacción iniciada conserva su snapshot ante revocaciones; comprobaciones nuevas ven cambios confirmados. Un atacante con SQL arbitrario puede modificar GUC: no son credenciales y no sustituyen autenticación/consultas parametrizadas/autorización. No se cubren todavía jobs, archivos o cachés. [ADR-036](docs/DECISIONS.md) detalla políticas, actores y coordinación. No avanzar a 2.3 sin revisión.
 
 ## Requisitos
 
@@ -24,7 +63,7 @@ pnpm exec node --version
 pnpm exec playwright install --only-shell chromium
 ```
 
-Crear `.env` con catorce contraseñas/claves aleatorias e independientes, sin imprimirlas. Este comando **falla si el archivo ya existe**; para un entorno existente conservarlo y agregar únicamente las variables faltantes de `.env.example`.
+Crear `.env` con quince contraseñas/claves aleatorias e independientes, sin imprimirlas. Este comando **falla si el archivo ya existe**; para un entorno existente conservarlo y agregar únicamente las variables faltantes de `.env.example`.
 
 ```powershell
 @'
@@ -102,7 +141,7 @@ Las páginas permiten login/logout y muestran identidad técnica. GET /auth/me v
 
 ## Límites actuales
 
-identity-bff tiene dos consumidores Next.js reales; sin paquetes vacíos, módulos comerciales ni worker. Organizations contiene Tenant/BusinessGroup/Company/Branch/OU con integridad transaccional, sin rutas públicas. Sin Membership, RBAC, RLS ni UoW genérico. Keycloak conserva cuentas y contraseñas empresariales; UserIdentity solo referencia issuer/sub con UUID propio. Integridad por tenant no equivale a autorización ni aislamiento de lectura.
+identity-bff tiene dos consumidores Next.js reales; sin paquetes vacíos, módulos comerciales ni worker. Organizations contiene Tenant/BusinessGroup/Company/Branch/OU con integridad transaccional, sin rutas públicas. Memberships y RLS vigentes se describen en ADR-035/036; sin RBAC ni UoW genérico. Keycloak conserva cuentas y contraseñas empresariales; UserIdentity solo referencia issuer/sub con UUID propio. Integridad por tenant no equivale a autorización ni aislamiento de lectura.
 
 ## Primer RLS de Memberships — 2.1
 
@@ -122,11 +161,11 @@ La política compara el UUID de fila como texto con el contexto: ausente, vacío
 
 Una consulta app fuera del scope transaccional devuelve colección vacía/false aunque reciba un user_identity_id correcto. Pasar siempre el manager del scope a los contratos de lectura; no compartirlo entre solicitudes. LOCAL se retira automáticamente al confirmar/revertir, antes de devolver la conexión al pool. No usar SET SESSION: su valor se restauraría tras finalizar un LOCAL. La garantía se verifica con el mismo pg_backend_pid en un pool de una conexión, cambios de identidad, rollback y concurrencia.
 
-**Límite de confianza:** el GUC no autentica. Un atacante con SQL arbitrario en esa misma conexión puede cambiarlo y suplantar una identidad. RLS no sustituye validación JWT, autorización NestJS futura, consultas parametrizadas ni separación de secretos. El helper es un contrato backend confiable, no un verificador JWT alternativo. No hay SECURITY DEFINER ni BYPASSRLS para resolver el UUID inicial. Organizations continúa sin RLS y la selección Portal sigue siendo solo preferencia.
+**Límite de confianza:** el GUC no autentica. Un atacante con SQL arbitrario en esa misma conexión puede cambiarlo y suplantar una identidad. RLS no sustituye validación JWT, autorización NestJS futura, consultas parametrizadas ni separación de secretos. El helper es un contrato backend confiable, no un verificador JWT alternativo. No hay SECURITY DEFINER ni BYPASSRLS para resolver el UUID inicial. En 2.1 Organizations no tenía RLS; 2.2 lo incorpora conforme ADR-036. La selección Portal sigue siendo solo preferencia.
 
 FK/UNIQUE/PK verifican integridad global incluso sobre filas ocultas; los SELECT explícitos de triggers obedecen al actor. Las políticas del operador permiten contar todo el historial para bootstrap/idempotencia. Auditoría permanece privada por ACL y triggers. Una prueba fuerza rechazo RLS en la segunda escritura de una transacción y verifica que tampoco persistan la primera ni sus eventos. No exponer diagnósticos SQL por HTTP: las restricciones pueden revelar existencia a escritores confiables. Operación y decisión completas: ADR-035.
 
-`pnpm test` mantiene CLI bootstrap real, PostgreSQL/Keycloak descartables, JWT concurrentes, navegador real, login/logout/refresh y aislamiento de secretos. Agrega SQL directo sin filtros/joins, contextos inválidos, mismo pool tras commit/rollback, identidad sin pertenencias, límites restrictivos y FK bajo FORCE. Son pruebas de **aislamiento RLS de Memberships por identidad**, no de autorización empresarial, RBAC o RLS de tenants/empresas/sucursales. No avanzar a 2.2 sin revisión.
+`pnpm test` mantiene CLI bootstrap real, PostgreSQL/Keycloak descartables, JWT concurrentes, navegador real, login/logout/refresh y aislamiento de secretos. Agrega SQL directo sin filtros/joins, contextos inválidos, mismo pool tras commit/rollback, identidad sin pertenencias, límites restrictivos y FK bajo FORCE. Son pruebas de **aislamiento RLS de Memberships por identidad**, no de autorización empresarial, RBAC o RLS de tenants/empresas/sucursales. 2.1 aprobado; extensión de Organizations en 2.2/ADR-036.
 
 ## Contexto y selector mínimo Portal — 1.6
 
@@ -152,7 +191,7 @@ El navegador usa únicamente el BFF Portal:
 
 La cookie sigue conteniendo solo SID opaco sellado. El UUID elegido está exclusivamente en la fila técnica de sesión Portal, sin FK empresarial ni claim permanente. Su revisión optimista es independiente de la versión/lease de tokens: refresh no sobrescribe contexto y seleccionar no reescribe tokens. Logout elimina la fila completa. La invalidación automática de un UUID obsoleto en GET es mantenimiento derivado de PostgreSQL, sin candidatos aceptados ni posibilidad de limpiar una selección válida por parámetros. Ante errores de comprobación no se devuelve contexto como válido.
 
-**La selección no concede permisos ni es autoridad para operaciones empresariales.** Cada operación futura deberá revalidar pertenencia, estados y permisos en su propia transacción. Una comprobación en curso ve su snapshot; una revocación confirmada se observa en comprobaciones nuevas, no cancela retroactivamente solicitudes ya iniciadas. 2.1 añade contexto de identidad y RLS Memberships según ADR-035; no hay todavía contexto tenant definitivo ni RLS Organizations.
+**La selección no concede permisos ni es autoridad para operaciones empresariales.** Cada operación futura deberá revalidar pertenencia, estados y permisos en su propia transacción. Una comprobación en curso ve su snapshot; una revocación confirmada se observa en comprobaciones nuevas, no cancela retroactivamente solicitudes ya iniciadas. 2.1 agrega identidad LOCAL/RLS Memberships; 2.2 agrega tenant LOCAL/RLS Organizations (ADR-035/036).
 
 Pruebas: `pnpm test` incluye PostgreSQL/Keycloak descartables, concurrencia, refresh, logout, aislamiento de procesos y Chromium real interactuando con el selector y ambas aplicaciones. **Playwright 1.64.1** es una dependencia exclusiva de pruebas compatible con Node 24; no agrega runtime ni un segundo framework de tests. Instalar su Chromium headless con el comando del inicio; en una máquina Linux nueva usar `pnpm exec playwright install --with-deps --only-shell chromium`. CI fija Ubuntu 24.04 (bibliotecas de navegador preinstaladas), descarga solo Chromium y verifica su arranque antes de las pruebas; instalación limitada a cinco minutos, sin actualizar fuentes/paquetes OS ajenos. No se guardan trazas ni diagnósticos con credenciales. Los clientes/usuarios de prueba solo existen en Keycloak descartable.
 
@@ -186,7 +225,7 @@ El request UUID identifica una transición material y sus reintentos; conservarl
 
 Auditoría `memberships.audit_event`: CREATED/REVOKED, actor, rol PostgreSQL efectivo, motivo, fuente, request UUID y fecha; inserción por triggers en la misma transacción, sin modificaciones ni borrados runtime. Inspección solo por operador/migrador, no API/BFF. No incluir secretos en el motivo. Esto no es auditoría resistente a un migrador/operador del host privilegiado.
 
-`pnpm test` ejecuta CLI real repetido y concurrente, altas muchos-a-muchos, revocaciones, FK/UNIQUE/clave compuesta, rechazo de escrituras no autorizadas y reconciliación de ACL contra PostgreSQL descartable; también login/logout/refresh reales con Keycloak y ausencia de autoafiliación/endpoints. No crea tenants o identidades reales ni ejecuta bootstrap sin UUID explícitos en tu base habitual. Diseño de consulta pretenant fail-closed para Fase 2: ADR-032 y ARCHITECTURE.md. **Todavía no hay RLS ni aislamiento de lecturas por usuario/tenant en SQL.**
+`pnpm test` ejecuta CLI real repetido y concurrente, altas muchos-a-muchos, revocaciones, FK/UNIQUE/clave compuesta, rechazo de escrituras no autorizadas y reconciliación de ACL contra PostgreSQL descartable; también login/logout/refresh reales con Keycloak y ausencia de autoafiliación/endpoints. No crea tenants o identidades reales ni ejecuta bootstrap sin UUID explícitos en tu base habitual. Diseño de consulta pretenant fail-closed para Fase 2: ADR-032 y ARCHITECTURE.md. Estado histórico de 1.5: RLS por identidad/tenant se agrega en 2.1/2.2.
 
 ## Organizations interno — 1.4
 
@@ -364,9 +403,9 @@ pnpm test
 docker compose -f compose.test.yaml down
 ```
 
-Node test runner ejecuta pruebas reales: conexiones, credenciales inválidas, migraciones, CRUD, secuencias, restricciones DDL/roles, defaults de objetos futuros, idempotencia y reversión/reaplicación. Cada ejecución crea una base y roles únicos y los elimina al terminar. Nunca toma DB_NAME como destino de borrado. No omite las pruebas si falta PostgreSQL: falla con una instrucción de configuración. **Estas pruebas no validan aislamiento multi-tenant ni RLS.**
+Node test runner ejecuta pruebas reales: conexiones, credenciales inválidas, migraciones, CRUD, secuencias, restricciones DDL/roles, defaults de objetos futuros, idempotencia y reversión/reaplicación. Cada ejecución crea una base y roles únicos y los elimina al terminar. Nunca toma DB_NAME como destino de borrado. No omite las pruebas si falta PostgreSQL: falla con una instrucción de configuración. Las pruebas iniciales de 0.5 validan persistencia; las suites 2.1/2.2 agregan aislamiento RLS por identidad/tenant.
 
-También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/PKCE, emisión para ambos clientes y preservación de configuraciones ajenas. La suite runtime arranca los tres servidores en 13000/13001/13002 y prueba sus rutas HTTP reales: login, callbacks/code, cookies, CSRF, expiración, revocación, refresh concurrente, logout y JWT. Usa base/roles únicos y artefactos .next-runtime-test; elimina solo sus fixtures. No es prueba visual de navegador ni validación de autorización empresarial/RLS. Usuarios sintéticos/efímeros y negativos criptográficos identificados por separado.
+También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/PKCE, emisión para ambos clientes y preservación de configuraciones ajenas. La suite runtime arranca los tres servidores en 13000/13001/13002 y prueba sus rutas HTTP reales: login, callbacks/code, cookies, CSRF, expiración, revocación, refresh concurrente, logout y JWT. Usa base/roles únicos y artefactos .next-runtime-test; elimina solo sus fixtures. Además se conserva Chromium real para el selector; 2.1/2.2 agregan pruebas RLS SQL. No se valida autorización empresarial. Usuarios sintéticos/efímeros y negativos criptográficos identificados por separado.
 
 ## Calidad y CI
 
@@ -378,4 +417,4 @@ También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/
 
 [GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL/Keycloak temporales con contraseñas aleatorias y los detiene al terminar. No depende de servicios locales ni secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
 
-Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Fases 0/1 cerradas por el usuario; estado y siguientes incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No avanzar a 2.2 ni implementar RBAC sin revisión de 2.1.**
+Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Fases 0/1 cerradas por el usuario; estado y siguientes incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **2.1 aprobado; 2.2 pendiente de revisión. No avanzar a 2.3 ni RBAC.**

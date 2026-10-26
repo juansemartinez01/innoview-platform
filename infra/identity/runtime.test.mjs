@@ -25,7 +25,7 @@ const requireBff = createRequire(
 const { unsealData, sealData } = requireBff('iron-session');
 const { provisionDatabase } =
   await import('../../apps/api/dist/persistence/provision.js');
-const { createDataSource } =
+const { createDataSource, initializeOrganizationsOperatorDataSource } =
   await import('../../apps/api/dist/persistence/data-sources.js');
 const { Store, hash } =
   await import('../../packages/identity-bff/dist/store.js');
@@ -124,6 +124,8 @@ await test(
       DB_CONTROL_PASSWORD: secret(),
       DB_MEMBERSHIP_USER: `test_membership_${suffix}`,
       DB_MEMBERSHIP_PASSWORD: secret(),
+      DB_ORGANIZATIONS_USER: `test_organizations_${suffix}`,
+      DB_ORGANIZATIONS_PASSWORD: secret(),
       PORTAL_COOKIE_PASSWORD: secret(),
       PORTAL_TOKEN_PASSWORD: secret(),
       CONTROL_COOKIE_PASSWORD: secret(),
@@ -488,7 +490,7 @@ await test(
           for (const keys of records) {
             assert.ok(
               !keys.some((key) =>
-                /^(DB_(BOOTSTRAP|MIGRATOR|MEMBERSHIP|APP)_|KEYCLOAK_|IDENTITY_|PLATFORM_|TEST_)/.test(
+                /^(DB_(BOOTSTRAP|MIGRATOR|MEMBERSHIP|ORGANIZATIONS|APP)_|KEYCLOAK_|IDENTITY_|PLATFORM_|TEST_)/.test(
                   key,
                 ),
               ),
@@ -720,6 +722,7 @@ await test(
           );
           assert.deepEqual(tables.map((row) => row.table_name).sort(), [
             'audit_event',
+            'audit_event',
             'branch',
             'business_group',
             'company',
@@ -730,6 +733,7 @@ await test(
             'sessions',
             'sessions',
             'tenant',
+            'tenant_directory',
             'typeorm_metadata',
             'user_identity',
           ]);
@@ -760,8 +764,7 @@ await test(
         async () => {
           const { OrganizationsService } =
             await import('../../apps/api/dist/organizations/organizations.service.js');
-          const source = createDataSource('app', env);
-          await source.initialize();
+          const source = await initializeOrganizationsOperatorDataSource(env);
           try {
             const service = new OrganizationsService(source);
             for (const label of ['Route fixture A', 'Route fixture B']) {
@@ -1272,6 +1275,7 @@ await test(
           'DB_PORTAL_USER',
           'DB_CONTROL_USER',
           'DB_MEMBERSHIP_USER',
+          'DB_ORGANIZATIONS_USER',
         ])
           await bootstrap.query(`DROP ROLE ${pg.escapeIdentifier(env[key])}`);
       }
