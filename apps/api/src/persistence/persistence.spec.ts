@@ -10,6 +10,7 @@ import {
   initializeApplicationDataSource,
   validateMigratorConnection,
 } from './data-sources.js';
+import { verifyContextPersistence } from '../context/context.spec.js';
 import { verifyMemberships } from '../memberships/memberships.spec.js';
 import { verifyOrganizations } from '../organizations/organizations.spec.js';
 import { provisionDatabase } from './provision.js';
@@ -149,7 +150,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await t.test(
       'migrator applies the real migration and owns the technical table',
       async () => {
-        assert.equal((await migrator.runMigrations()).length, 5);
+        assert.equal((await migrator.runMigrations()).length, 6);
         assert.equal(await migrator.showMigrations(), false);
         const [owner] = await migrator.query<{ owner: string }[]>(
           "SELECT pg_get_userbyid(relowner) AS owner FROM pg_class WHERE oid='foundation.persistence_probe'::regclass",
@@ -442,11 +443,25 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
 
     await verifyOrganizations(t, app, migrator, env);
     await verifyMemberships(t, app, migrator, env);
+    await verifyContextPersistence(t, app, env);
 
     await t.test(
       'real migration reverts and reapplies only in this disposable database',
       async () => {
         assert.match(database, /^innoview_test_[a-f0-9]{32}$/);
+        const revertContext = spawnSync(
+          process.execPath,
+          [
+            fileURLToPath(new URL('./migration.cli.js', import.meta.url)),
+            'revert',
+          ],
+          {
+            env: { ...process.env, ...env, DB_DISPOSABLE: 'true' },
+            encoding: 'utf8',
+            windowsHide: true,
+          },
+        );
+        assert.equal(revertContext.status, 0, revertContext.stderr);
         const revertMemberships = spawnSync(
           process.execPath,
           [

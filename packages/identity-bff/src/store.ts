@@ -33,6 +33,9 @@ export interface Row {
   lease_id: string | null;
   lease_until: Date | null;
   version: number;
+  // Only Portal has these columns; Control Center has no client context.
+  selected_tenant_id?: string | null;
+  context_revision?: number;
 }
 
 export class Store {
@@ -144,5 +147,13 @@ export class Store {
     await this.source.query(`DELETE FROM ${this.table} WHERE id_hash=$1`, [
       hash(id),
     ]);
+  }
+  async changeContext(id: string, revision: number, tenantId: string | null) {
+    if (this.config.app !== 'portal') throw new Error('Portal context only');
+    const [rows] = await this.source.query<[Row[], number]>(
+      `UPDATE ${this.table} SET selected_tenant_id=$3,context_revision=context_revision+1 WHERE id_hash=$1 AND kind='session' AND context_revision=$2 AND expires_at>now() AND idle_until>now() RETURNING *`,
+      [hash(id), revision, tenantId],
+    );
+    return rows[0];
   }
 }

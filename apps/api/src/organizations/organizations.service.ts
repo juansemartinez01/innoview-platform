@@ -24,6 +24,48 @@ export class OrganizationOperationError extends Error {
 export class OrganizationsService {
   constructor(@Inject(DataSource) private readonly source: DataSource) {}
 
+  async availableContextSummaries(tenantIds: string[], manager: EntityManager) {
+    if (
+      manager.connection !== this.source ||
+      !manager.queryRunner?.isTransactionActive
+    )
+      throw new Error('Active local transaction required');
+    if (!tenantIds.length) return [];
+    const rows = await manager
+      .getRepository(Tenant)
+      .createQueryBuilder('tenant')
+      .innerJoin(
+        BusinessGroup,
+        'groupRecord',
+        'groupRecord.tenant_id=tenant.id',
+      )
+      .innerJoin(
+        OrganizationalUnit,
+        'groupUnit',
+        "groupUnit.tenant_id=tenant.id AND groupUnit.id=groupRecord.id AND groupUnit.type='GROUP' AND groupUnit.status='ACTIVE'",
+      )
+      .where("tenant.id IN (:...tenantIds) AND tenant.status='ACTIVE'", {
+        tenantIds,
+      })
+      .select('tenant.id', 'id')
+      .addSelect('tenant.name', 'name')
+      .addSelect('groupUnit.id', 'group_id')
+      .addSelect('groupUnit.name', 'group_name')
+      .orderBy('tenant.name', 'ASC')
+      .addOrderBy('tenant.id', 'ASC')
+      .getRawMany<{
+        id: string;
+        name: string;
+        group_id: string;
+        group_name: string;
+      }>();
+    return rows.map((row) => ({
+      id: row.id,
+      name: row.name,
+      group: { id: row.group_id, name: row.group_name },
+    }));
+  }
+
   private name(value: string) {
     if (typeof value !== 'string' || !value.trim() || value.length > 200)
       throw new OrganizationOperationError();

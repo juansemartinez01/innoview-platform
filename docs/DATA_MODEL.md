@@ -67,6 +67,14 @@ API tiene USAGE y SELECT sobre membership; sin escritura ni lectura de audit_eve
 
 Registrar ACTIVE es idempotente; registrar REVOKED falla. Revocar repetidamente conserva primer evento/fecha/motivo. Reactivación no permitida; habilitarla posteriormente requiere decisión explícita, migración y política auditada. Bootstrap solo crea la primera pertenencia de un tenant existente, con UUID Identity existente; reintento original devuelve estado actual, sin reactivar ni dar permisos. No confundir pertenencia con disponibilidad de Tenant/OU. Revocación se releerá desde DB en cada solicitud posterior; diseño pretenant compatible con RLS fail-closed documentado en ADR-032, todavía no implementado ni validado como aislamiento.
 
+## Sesión Portal y contexto — 1.6
+
+PortalContext1793001600000 añade selected_tenant_id UUID nullable y context_revision integer NOT NULL DEFAULT 0 a portal_sessions.sessions. CHECK de revisión no negativa y selección únicamente en filas kind=session. No son atributos de UserIdentity/Membership ni se duplican nombres/estados del tenant: cada respuesta mínima procede de una validación Core actual. No hay nuevas entidades empresariales, tablas, roles ni grants globales. Se conservan tokens y sesiones existentes; synchronize permanece false y no se modifican migraciones anteriores.
+
+Sin FK entre la preferencia técnica y Organizations: conocer/persistir UUID no demuestra pertenencia, y no se acopla la retención de sesiones con el historial empresarial. Un UUID obsoleto se invalida al comprobarlo contra Core. Solo rol Portal accede a esa sesión; API, Control Center y operador Memberships no reciben permisos adicionales. Control Center mantiene su esquema anterior sin estas columnas.
+
+La escritura CAS compara context_revision y vigencia de la sesión; incrementa únicamente esa revisión/selección. El payload cifrado de tokens, version y lease no se reescriben al seleccionar, y refresh no toca estas columnas. El borrado de sesión elimina contexto; una actualización tardía sin fila vigente no hace INSERT. Un GET que detecta selección ya no disponible limpia únicamente la revisión observada, reintentando si hubo otro cambio. No hay transacción abierta durante HTTP. Contratos, límites y fases futuras: README/ADR-032/034.
+
 ## Authorization — posterior
 
 - Permission: código estable namespaceado, p.ej. sales.orders.read; proviene de módulo.

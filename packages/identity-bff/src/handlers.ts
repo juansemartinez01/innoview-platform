@@ -3,6 +3,12 @@ import { setTimeout as pause } from 'node:timers/promises';
 import { cookies } from 'next/headers.js';
 import { getIronSession } from 'iron-session';
 import * as oidc from 'openid-client';
+import {
+  ContextFailure,
+  currentContext,
+  selectContext,
+  tenantUuid,
+} from './context.js';
 import { configuration, type App } from './config.js';
 import { Store, hash, random, type Payload, type Row } from './store.js';
 
@@ -154,6 +160,9 @@ async function liveSession(
 
 export async function handle(app: App, request: Request): Promise<Response> {
   try {
+    const incoming = new URL(request.url);
+    if (incoming.pathname.startsWith('/auth/context') && app !== 'portal')
+      return json({ error: 'Not found' }, 404);
     const store = await storeFor(app);
     const { config } = store;
     let cookie = await getIronSession<{ id?: string }>(
@@ -163,6 +172,79 @@ export async function handle(app: App, request: Request): Promise<Response> {
     const url = new URL(request.url);
     const path = url.pathname;
     const row = cookie.id ? await store.read(cookie.id) : undefined;
+    if (
+      ['/auth/context', '/auth/context/select', '/auth/context/clear'].includes(
+        path,
+      )
+    ) {
+      if (url.search) return json({ error: 'Invalid request' }, 400);
+      if (!cookie.id || row?.kind !== 'session')
+        return json({ error: 'Authenticated session required' }, 401);
+      const live = await liveSession(store, cookie.id);
+      if (!live?.access) {
+        cookie.destroy();
+        return json({ error: 'Authenticated session required' }, 401);
+      }
+      try {
+        if (path === '/auth/context' && request.method === 'GET')
+          return json(await currentContext(store, cookie.id, live.access));
+        if (request.method !== 'POST' || path === '/auth/context')
+          return json({ error: 'Not found' }, 404);
+        const fresh = await store.read(cookie.id);
+        if (!fresh || fresh.kind !== 'session') throw new ContextFailure(401);
+        let form: FormData;
+        try {
+          form = await csrf(request, store, fresh);
+        } catch {
+          return json({ error: 'Invalid request' }, 403);
+        }
+        const selecting = path === '/auth/context/select';
+        const fields = selecting
+          ? ['csrf', 'revision', 'tenantId']
+          : ['csrf', 'revision'];
+        if (
+          [...form.keys()].some((key) => !fields.includes(key)) ||
+          fields.some((key) => form.getAll(key).length !== 1)
+        )
+          return json({ error: 'Invalid request' }, 400);
+        const version = form.get('revision');
+        const candidate = selecting ? form.get('tenantId') : null;
+        if (
+          typeof version !== 'string' ||
+          !/^(0|[1-9][0-9]{0,9})$/.test(version) ||
+          Number(version) > 2147483646 ||
+          (selecting &&
+            (typeof candidate !== 'string' || !tenantUuid(candidate)))
+        )
+          return json({ error: 'Invalid request' }, 400);
+        return json(
+          await selectContext(
+            store,
+            cookie.id,
+            live.access,
+            Number(version),
+            typeof candidate === 'string' ? candidate.toLowerCase() : null,
+          ),
+        );
+      } catch (error) {
+        if (!(error instanceof ContextFailure)) throw error;
+        if (error.status === 401) {
+          await store.revoke(cookie.id);
+          cookie.destroy();
+        }
+        return json(
+          {
+            error:
+              error.status === 404
+                ? 'Context unavailable'
+                : error.status === 409
+                  ? 'Context changed; reload and retry'
+                  : 'Context verification unavailable',
+          },
+          error.status,
+        );
+      }
+    }
     if (path === '/auth/callback' && request.method === 'GET') {
       if (!row || row.kind !== 'login')
         return json({ error: 'Invalid authentication transaction' }, 400);

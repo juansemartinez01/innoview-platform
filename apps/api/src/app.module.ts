@@ -1,3 +1,4 @@
+import { ContextModule } from './context/context.module.js';
 import { MembershipsModule } from './memberships/memberships.module.js';
 import { OrganizationsModule } from './organizations/organizations.module.js';
 import { Module } from '@nestjs/common';
@@ -11,6 +12,7 @@ import { PersistenceModule } from './persistence/persistence.module.js';
     IdentityModule,
     OrganizationsModule,
     MembershipsModule,
+    ContextModule,
   ],
   controllers: [AppController],
 })

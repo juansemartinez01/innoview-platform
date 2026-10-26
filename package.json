@@ -41,6 +41,7 @@
     "globals": "16.4.0",
     "jose": "6.2.13",
     "openid-client": "6.8.8",
+    "playwright": "1.64.1",
     "prettier": "3.9.10",
     "turbo": "2.11.10",
     "typescript": "6.0.3",

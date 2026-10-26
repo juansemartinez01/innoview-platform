@@ -33,6 +33,22 @@ function text(value: string, max: number): string {
 export class MembershipsService {
   constructor(@Inject(DataSource) private readonly source: DataSource) {}
 
+  async activeTenantReferences(
+    userIdentityId: string,
+    manager: EntityManager,
+  ): Promise<string[]> {
+    if (
+      manager.connection !== this.source ||
+      !manager.queryRunner?.isTransactionActive
+    )
+      throw new Error('Active local transaction required');
+    const rows = await manager.getRepository(Membership).find({
+      select: { tenantId: true },
+      where: { userIdentityId: uuid(userIdentityId), status: 'ACTIVE' },
+    });
+    return rows.map((row) => row.tenantId);
+  }
+
   listForIdentity(userIdentityId: string): Promise<Membership[]> {
     return this.source.getRepository(Membership).find({
       where: { userIdentityId: uuid(userIdentityId) },

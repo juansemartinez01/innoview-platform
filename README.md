@@ -1,6 +1,6 @@
 # Innoview Platform
 
-Fase 0 cerrada e incrementos 1.1–1.4 aprobados. Incremento 1.5: Memberships interno implementado, pendiente revisión. Fuente de verdad: AGENTS.md y docs/. Sin endpoints organizacionales o de administración de membresías, autorización empresarial ni aislamiento RLS.
+Fase 0 cerrada e incrementos 1.1–1.5 aprobados, incluido el hardening de 27cb6c7. Incremento 1.6: contexto y selector mínimo Portal implementados, pendientes de revisión. Fase 1 todavía no declarada cerrada. Fuente de verdad: AGENTS.md y docs/. Sin administración pública de membresías, permisos empresariales ni RLS.
 
 ## Requisitos
 
@@ -21,6 +21,7 @@ git clone https://github.com/juansemartinez01/innoview-platform.git
 Set-Location innoview-platform
 pnpm install --frozen-lockfile
 pnpm exec node --version
+pnpm exec playwright install --only-shell chromium
 ```
 
 Crear `.env` con catorce contraseñas/claves aleatorias e independientes, sin imprimirlas. Este comando **falla si el archivo ya existe**; para un entorno existente conservarlo y agregar únicamente las variables faltantes de `.env.example`.
@@ -52,7 +53,7 @@ pnpm oidc:provision
 pnpm oidc:check
 ```
 
-Resultado esperado: tres servicios `healthy` y las cinco migraciones FoundationProbe/BffSessions/UserIdentity/Organizations/Memberships marcadas `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`. El login de aplicaciones usa cuentas del realm innoview, no administradores master.
+Resultado esperado: tres servicios `healthy` y las seis migraciones FoundationProbe/BffSessions/UserIdentity/Organizations/Memberships/PortalContext marcadas `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`. El login de aplicaciones usa cuentas del realm innoview, no administradores master.
 
 Validar calidad y pruebas en PostgreSQL y Keycloak temporales independientes:
 
@@ -102,6 +103,34 @@ Las páginas permiten login/logout y muestran identidad técnica. GET /auth/me v
 ## Límites actuales
 
 identity-bff tiene dos consumidores Next.js reales; sin paquetes vacíos, módulos comerciales ni worker. Organizations contiene Tenant/BusinessGroup/Company/Branch/OU con integridad transaccional, sin rutas públicas. Sin Membership, RBAC, RLS ni UoW genérico. Keycloak conserva cuentas y contraseñas empresariales; UserIdentity solo referencia issuer/sub con UUID propio. Integridad por tenant no equivale a autorización ni aislamiento de lectura.
+
+## Contexto y selector mínimo Portal — 1.6
+
+En una instalación existente, conservar `.env`, claves y volúmenes; ejecutar `pnpm db:run` y `pnpm db:show`. No se agregan secretos ni roles. PortalContext1793001600000 agrega únicamente selected_tenant_id y context_revision a portal_sessions.sessions; no cambia Control Center ni entidades empresariales.
+
+Levantar `pnpm dev`, abrir http://127.0.0.1:3000 e iniciar sesión con una cuenta del realm innoview. El Portal muestra las organizaciones disponibles, un selector, la selección actual y un botón para limpiarla. Al recargar conserva la elección; cambiar de organización requiere validación nueva. Si no hay pertenencias activas/disponibles muestra «No tenés organizaciones disponibles». Volver a la página o recuperar foco comprueba nuevamente el contexto. Una revocación o desactivación detectada limpia la elección y pide elegir otra. Control Center conserva solo autenticación/identidad técnica.
+
+No hay autoafiliación ni seeds de clientes. Para obtener opciones hacen falta Tenant/BusinessGroup/OU existentes ACTIVE e Identity existente con Membership ACTIVE creada por una operación confiable de 1.5. El login no crea tenants ni membresías. Sin esos datos la colección vacía es el resultado correcto; no hay un endpoint público o una pantalla para aprovisionarlos.
+
+Contratos API, con Authorization Bearer de Portal y Cache-Control: no-store:
+
+| Operación              | Entrada                                     | Respuesta                                                                                                                                                                                 |
+| ---------------------- | ------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET /context/options   | Sin query/body ni user_identity_id          | 200 `{ "options": [{ "id": "tenant-uuid", "name": "Tenant", "group": { "id": "group-ou-uuid", "name": "Grupo" } }] }`; colección vacía si no hay identidad local/pertenencias disponibles |
+| POST /context/validate | JSON exacto `{ "tenantId": "tenant-uuid" }` | 200 con una opción del mismo formato; 404 uniforme «Context unavailable» para ajeno/inexistente/revocado/inactivo/archivado; 400 para formato o campos inválidos                          |
+
+JWT inválido/ausente: 401; cliente Control Center en estas rutas: 403, restricción técnica de superficie que no implica RBAC. AuthenticationModule valida el principal, IdentityModule consulta su UUID sin registrar nada y Memberships/Organizations aportan contratos de lectura en una transacción corta REPEATABLE READ y READ ONLY. El estado del grupo pertenece a su OU GROUP, conforme ADR-030; se exige también el registro BusinessGroup y Tenant ACTIVE. No se devuelven empresas, sucursales, membresías, roles ni identidades ajenas.
+
+El navegador usa únicamente el BFF Portal:
+
+- GET /auth/context → `{ options, selected, revision, invalidated }`, con selected nulo o una opción mínima. Revalida contra API y elimina preferencias obsoletas mediante CAS; no acepta candidatos/query.
+- POST /auth/context/select → formulario exacto csrf, revision y tenantId. POST /auth/context/clear → csrf y revision. Ambos exigen sesión, Origin propio y CSRF; responden `{ selected, revision }`. Revisiones obsoletas/concurrentes: 409 para recargar y reintentar. No hay estas rutas en Control Center.
+
+La cookie sigue conteniendo solo SID opaco sellado. El UUID elegido está exclusivamente en la fila técnica de sesión Portal, sin FK empresarial ni claim permanente. Su revisión optimista es independiente de la versión/lease de tokens: refresh no sobrescribe contexto y seleccionar no reescribe tokens. Logout elimina la fila completa. La invalidación automática de un UUID obsoleto en GET es mantenimiento derivado de PostgreSQL, sin candidatos aceptados ni posibilidad de limpiar una selección válida por parámetros. Ante errores de comprobación no se devuelve contexto como válido.
+
+**La selección no concede permisos ni es autoridad para operaciones empresariales.** Cada operación futura deberá revalidar pertenencia, estados y permisos en su propia transacción. Una comprobación en curso ve su snapshot; una revocación confirmada se observa en comprobaciones nuevas, no cancela retroactivamente solicitudes ya iniciadas. No hay RLS ni contexto GUC definitivo: ADR-032/034 describen la integración futura, sin bypass.
+
+Pruebas: `pnpm test` incluye PostgreSQL/Keycloak descartables, concurrencia, refresh, logout, aislamiento de procesos y Chromium real interactuando con el selector y ambas aplicaciones. **Playwright 1.64.1** es una dependencia exclusiva de pruebas compatible con Node 24; no agrega runtime ni un segundo framework de tests. Instalar su Chromium headless con el comando del inicio; en Linux/CI usar `pnpm exec playwright install --with-deps --only-shell chromium`. No se guardan trazas ni diagnósticos con credenciales. Los clientes/usuarios de prueba solo existen en Keycloak descartable.
 
 ## Aislamiento de credenciales por proceso — corrección de 1.5
 
@@ -325,4 +354,4 @@ También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/
 
 [GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL/Keycloak temporales con contraseñas aleatorias y los detiene al terminar. No depende de servicios locales ni secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
 
-Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Próximos incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No avanzar a 1.6 sin revisión de 1.5.**
+Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Próximas fases: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No iniciar Fase 2 ni declarar cerrada Fase 1 sin revisión de 1.6.**

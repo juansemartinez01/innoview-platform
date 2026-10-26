@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { verifyContext } from './context.checks.mjs';
 import { test } from 'node:test';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
@@ -933,6 +934,20 @@ await test(
           );
         },
       );
+      await verifyContext(t, {
+        env,
+        login,
+        Browser,
+        stores,
+        storedSession,
+        migrator,
+        bootstrap,
+        admin,
+        userPassword,
+        sensitive,
+        portal,
+        control,
+      });
       await t.test(
         'state and nonce tampering consume the transaction and cannot establish a session',
         async () => {

@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { TenantContext } from './tenant-context';
 type Session = {
   authenticated: boolean;
   csrf: string;
@@ -42,6 +43,7 @@ export default function Home() {
         <>
           <h2>Sesión iniciada</h2>
           <p>Identidad: {session.identity?.id}</p>
+          <TenantContext csrf={session.csrf} />
           <form method="post" action="/auth/logout">
             <input type="hidden" name="csrf" value={session.csrf} />
             <button type="submit">Cerrar sesión local</button>

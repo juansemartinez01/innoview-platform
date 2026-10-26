@@ -13,7 +13,7 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
-import { DataSource } from 'typeorm';
+import { DataSource, type EntityManager } from 'typeorm';
 import {
   AuthenticationGuard,
   AuthenticationModule,
@@ -49,6 +49,23 @@ export class IdentityService {
     } catch {
       throw new ServiceUnavailableException('Identity persistence unavailable');
     }
+  }
+
+  // Read-only reference contract for the authenticated context coordinator.
+  async findReference(
+    principal: Principal,
+    manager: EntityManager,
+  ): Promise<string | null> {
+    if (
+      manager.connection !== this.source ||
+      !manager.queryRunner?.isTransactionActive
+    )
+      throw new Error('Active local transaction required');
+    const identity = await manager.getRepository(UserIdentity).findOne({
+      select: { id: true },
+      where: { issuer: principal.issuer, externalSubject: principal.subject },
+    });
+    return identity?.id ?? null;
   }
 
   async find(principal: Principal): Promise<UserIdentity> {

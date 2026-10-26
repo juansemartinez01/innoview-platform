@@ -1,6 +1,6 @@
 # Identity — contrato OIDC y runtime BFF
 
-1.1–1.4 aprobados; contrato OIDC v2 vigente. 1.5 agrega Memberships interno sin cambiar login/sesiones/identidad local ni autoafiliar al autenticar. No hay endpoints organizacionales/de administración de membresías, RBAC ni RLS. Una identidad válida en Control Center no concede administración Innoview. Ver ADR-030 y DATA_MODEL.md para el modelo interno.
+1.1–1.5 aprobados, incluido hardening 27cb6c7; contrato OIDC v2 vigente. 1.6 agrega contexto validado y preferencia de navegación solo en sesión Portal, sin cambios de issuer, audiencias, clientes, scopes ni claims. Control Center permanece técnico, sin selector/administración autorizada. No hay RBAC ni RLS. README y ADR-034 detallan contratos y límites; Fase 1 pendiente de revisión.
 
 ## Autoridad, clientes y scopes
 
