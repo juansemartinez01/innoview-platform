@@ -145,6 +145,7 @@ await test(
     let created = false;
     let realmCreated = false;
     let migrator;
+    let membershipObserver;
     function runtimeKeys(output, prefix) {
       const marker = `${prefix} runtime admitted variables: `;
       return output
@@ -405,6 +406,8 @@ await test(
       migrator = createDataSource('migrator', env);
       await migrator.initialize();
       await migrator.runMigrations();
+      membershipObserver = createDataSource('membership', env);
+      await membershipObserver.initialize();
       for (const app of ['portal', 'control'])
         stores.push(await new Store(configuration(app, env)).open());
       const realm = desiredRealm();
@@ -737,7 +740,7 @@ await test(
         async () => {
           assert.equal(
             (
-              await migrator.query(
+              await membershipObserver.query(
                 'SELECT count(*)::int AS count FROM memberships.membership',
               )
             )[0].count,
@@ -1256,6 +1259,7 @@ await test(
       }
       for (const store of stores)
         if (store.source.isInitialized) await store.source.destroy();
+      if (membershipObserver?.isInitialized) await membershipObserver.destroy();
       if (migrator?.isInitialized) await migrator.destroy();
       if (realmCreated) await admin('realms/innoview', { method: 'DELETE' });
       if (created) {

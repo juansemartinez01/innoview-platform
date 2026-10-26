@@ -4,7 +4,7 @@ Fecha de selección: 2026-10-24. No se cambia el stack acordado.
 
 ## Estado de cierre — 2026-10-25
 
-Fase 0 oficialmente cerrada en c069a9a. 1.1–1.5 aprobados, incluido hardening 27cb6c7; 1.6 incorpora contexto Portal, pendiente revisión (ADR-034 y README). Sin autorización empresarial ni RLS. Hay seis migraciones; el nuevo rol operativo de Memberships usa credenciales independientes y la API solo consulta pertenencias. Actualizar `.env` conservando las credenciales previas, repetir db:provision/db:run; instrucciones de bootstrap explícito en README. La evidencia siguiente es el cierre histórico de Foundation, no el estado actual de sus esquemas: privilegios y verificaciones recientes están en README, DATA_MODEL y OIDC.
+Fase 0 oficialmente cerrada en c069a9a. Fase 1 aprobada/cerrada tras revisar b04cd26/e2aaf61; 2.1 incorpora contexto de identidad LOCAL y RLS Memberships, pendiente revisión (ADR-035 y README). Sin autorización empresarial ni RLS Organizations. Hay siete migraciones; el rol operativo de Memberships usa credenciales independientes y la API solo consulta pertenencias propias bajo RLS. Actualizar código/migración coordinadamente conservando `.env` y volúmenes; instrucciones de bootstrap explícito en README. La evidencia siguiente es el cierre histórico de Foundation, no el estado actual de sus esquemas: privilegios y verificaciones recientes están en README, DATA_MODEL y OIDC.
 
 | Incremento                   | Estado y evidencia                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------ |

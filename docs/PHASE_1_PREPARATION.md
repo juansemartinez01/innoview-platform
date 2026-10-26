@@ -2,7 +2,7 @@
 
 Fecha: 2026-10-25. Las ADR vigentes no cambian. Este documento propone contratos y orden de trabajo para revisión después de cerrar Fase 0; no autoriza implementación automática.
 
-Actualización 1.6: 1.1–1.5 aprobados y cerrados; contexto/selector Portal implementado, pendiente revisión (ADR-034). Este análisis histórico conserva propuestas, no autoriza avanzar. IMPLEMENTATION_PLAN.md fija la secuencia actual: 1.4 estructura interna, 1.5 Memberships, 1.6 contexto, Fase 2 autorización/RLS. Solo hay resúmenes contextuales propios, sin endpoints de estructuras privadas, autoafiliación, RBAC ni RLS; el bootstrap de pertenencias es operativo y explícito.
+Actualización 2.1: Fase 1 aprobada/cerrada en b04cd26/e2aaf61. Se implementa exclusivamente RLS Memberships/contexto identidad SQL (ADR-035), pendiente de revisión. Este análisis histórico conserva propuestas, no autoriza avanzar. IMPLEMENTATION_PLAN.md fija la secuencia actual: 1.4 estructura interna, 1.5 Memberships, 1.6 contexto, Fase 2 autorización/RLS. Solo hay resúmenes contextuales propios, sin endpoints de estructuras privadas, autoafiliación, RBAC ni RLS Organizations; el bootstrap de pertenencias es operativo y explícito.
 
 ## Dependencias y responsabilidades
 

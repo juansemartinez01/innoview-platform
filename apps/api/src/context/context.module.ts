@@ -7,7 +7,6 @@ import {
   Header,
   HttpCode,
   Injectable,
-  Inject,
   Module,
   NotFoundException,
   Post,
@@ -15,7 +14,6 @@ import {
   ServiceUnavailableException,
   UseGuards,
 } from '@nestjs/common';
-import { DataSource } from 'typeorm';
 import {
   AuthenticationGuard,
   AuthenticationModule,
@@ -24,19 +22,17 @@ import {
 } from '../authentication/authentication.module.js';
 import {
   IdentityModule,
-  IdentityService,
+  IdentityReadTransactions,
 } from '../identity/identity.module.js';
 import { MembershipsModule } from '../memberships/memberships.module.js';
 import { MembershipsService } from '../memberships/memberships.service.js';
 import { OrganizationsModule } from '../organizations/organizations.module.js';
 import { OrganizationsService } from '../organizations/organizations.service.js';
-import { PersistenceModule } from '../persistence/persistence.module.js';
 
 @Injectable()
 export class ContextService {
   constructor(
-    @Inject(DataSource) private readonly source: DataSource,
-    private readonly identities: IdentityService,
+    private readonly identityTransactions: IdentityReadTransactions,
     private readonly memberships: MembershipsService,
     private readonly organizations: OrganizationsService,
   ) {}
@@ -45,24 +41,22 @@ export class ContextService {
     try {
       // Concrete composition of module contracts, not private cross-module SQL
       // or a generic UoW. One snapshot, no HTTP and no business-data queries.
-      return await this.source.transaction(
-        'REPEATABLE READ',
-        async (manager) => {
-          await manager.query('SET TRANSACTION READ ONLY');
-          const identityId = await this.identities.findReference(
-            principal,
-            manager,
-          );
-          if (!identityId) return [];
-          const tenantIds = await this.memberships.activeTenantReferences(
-            identityId,
-            manager,
-          );
-          return this.organizations.availableContextSummaries(
-            candidate ? tenantIds.filter((id) => id === candidate) : tenantIds,
-            manager,
-          );
-        },
+      return (
+        (await this.identityTransactions.read(
+          principal,
+          async (manager, identityId) => {
+            const tenantIds = await this.memberships.activeTenantReferences(
+              identityId,
+              manager,
+            );
+            return this.organizations.availableContextSummaries(
+              candidate
+                ? tenantIds.filter((id) => id === candidate)
+                : tenantIds,
+              manager,
+            );
+          },
+        )) ?? []
       );
     } catch {
       throw new ServiceUnavailableException('Context verification unavailable');
@@ -124,7 +118,6 @@ export class ContextController {
 @Module({
   imports: [
     AuthenticationModule,
-    PersistenceModule,
     IdentityModule,
     MembershipsModule,
     OrganizationsModule,

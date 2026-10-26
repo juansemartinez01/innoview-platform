@@ -83,6 +83,51 @@ export class IdentityService {
   }
 }
 
+@Injectable()
+export class IdentityReadTransactions {
+  constructor(
+    @Inject(DataSource) private readonly source: DataSource,
+    private readonly identities: IdentityService,
+  ) {}
+
+  // Trusted backend contract: Principal comes from AuthenticationGuard, never
+  // from request body, navigation cookies or a supplied internal UUID. No HTTP
+  // may run in the callback. This is not a general business Unit of Work.
+  async read<T>(
+    principal: Principal,
+    operation: (manager: EntityManager, identityId: string) => Promise<T>,
+  ): Promise<T | null> {
+    return this.source.transaction('REPEATABLE READ', async (manager) => {
+      await manager.query('SET TRANSACTION READ ONLY');
+      // A clean local scope also protects the initial lookup from any inherited
+      // setting. Trusted application code never uses session-level SET here.
+      await manager.query(
+        "SELECT set_config('innoview.user_identity_id','',true)",
+      );
+      if (
+        !principal ||
+        typeof principal.issuer !== 'string' ||
+        !principal.issuer ||
+        typeof principal.subject !== 'string' ||
+        !principal.subject ||
+        typeof principal.clientId !== 'string' ||
+        !principal.clientId
+      )
+        return null;
+      const identityId = await this.identities.findReference(
+        principal,
+        manager,
+      );
+      if (!identityId) return null;
+      await manager.query(
+        "SELECT set_config('innoview.user_identity_id',$1,true)",
+        [identityId],
+      );
+      return operation(manager, identityId);
+    });
+  }
+}
+
 @Controller('identity')
 @UseGuards(AuthenticationGuard)
 export class LocalIdentityController {
@@ -114,7 +159,7 @@ export class LocalIdentityController {
 @Module({
   imports: [AuthenticationModule, PersistenceModule],
   controllers: [LocalIdentityController],
-  providers: [IdentityService],
-  exports: [IdentityService],
+  providers: [IdentityService, IdentityReadTransactions],
+  exports: [IdentityService, IdentityReadTransactions],
 })
 export class IdentityModule {}

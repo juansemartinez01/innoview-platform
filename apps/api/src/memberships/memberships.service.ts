@@ -49,22 +49,38 @@ export class MembershipsService {
     return rows.map((row) => row.tenantId);
   }
 
-  listForIdentity(userIdentityId: string): Promise<Membership[]> {
-    return this.source.getRepository(Membership).find({
+  listForIdentity(
+    userIdentityId: string,
+    manager: EntityManager = this.source.manager,
+  ): Promise<Membership[]> {
+    if (manager.connection !== this.source)
+      throw new Error('Local manager required');
+    return manager.getRepository(Membership).find({
       where: { userIdentityId: uuid(userIdentityId) },
       order: { createdAt: 'ASC', id: 'ASC' },
     });
   }
-  listActiveForIdentity(userIdentityId: string): Promise<Membership[]> {
-    return this.source.getRepository(Membership).find({
+  listActiveForIdentity(
+    userIdentityId: string,
+    manager: EntityManager = this.source.manager,
+  ): Promise<Membership[]> {
+    if (manager.connection !== this.source)
+      throw new Error('Local manager required');
+    return manager.getRepository(Membership).find({
       where: { userIdentityId: uuid(userIdentityId), status: 'ACTIVE' },
       order: { createdAt: 'ASC', id: 'ASC' },
     });
   }
-  async isActive(tenantId: string, userIdentityId: string): Promise<boolean> {
+  async isActive(
+    tenantId: string,
+    userIdentityId: string,
+    manager: EntityManager = this.source.manager,
+  ): Promise<boolean> {
+    if (manager.connection !== this.source)
+      throw new Error('Local manager required');
     // Fresh authoritative DB read; neither JWT claims nor a frontend tenant ID
     // substitute for this check. This alone does not authorize business data.
-    return this.source.getRepository(Membership).existsBy({
+    return manager.getRepository(Membership).existsBy({
       tenantId: uuid(tenantId),
       userIdentityId: uuid(userIdentityId),
       status: 'ACTIVE',

@@ -1,6 +1,6 @@
 # Innoview Platform
 
-Fase 0 cerrada e incrementos 1.1–1.5 aprobados, incluido el hardening de 27cb6c7. Incremento 1.6: contexto y selector mínimo Portal implementados, pendientes de revisión. Fase 1 todavía no declarada cerrada. Fuente de verdad: AGENTS.md y docs/. Sin administración pública de membresías, permisos empresariales ni RLS.
+Fases 0 y 1 oficialmente cerradas; 1.6 aprobado en b04cd26/e2aaf61. Incremento 2.1: contexto transaccional de identidad y RLS de Memberships implementados, pendientes de revisión. Fuente de verdad: AGENTS.md y docs/. Sin RLS Organizations, contexto tenant definitivo, RBAC ni administración pública de membresías.
 
 ## Requisitos
 
@@ -53,7 +53,7 @@ pnpm oidc:provision
 pnpm oidc:check
 ```
 
-Resultado esperado: tres servicios `healthy` y las seis migraciones FoundationProbe/BffSessions/UserIdentity/Organizations/Memberships/PortalContext marcadas `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`. El login de aplicaciones usa cuentas del realm innoview, no administradores master.
+Resultado esperado: tres servicios `healthy` y las siete migraciones FoundationProbe/BffSessions/UserIdentity/Organizations/Memberships/PortalContext/MembershipIdentityRls marcadas `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`. El login de aplicaciones usa cuentas del realm innoview, no administradores master.
 
 Validar calidad y pruebas en PostgreSQL y Keycloak temporales independientes:
 
@@ -104,6 +104,30 @@ Las páginas permiten login/logout y muestran identidad técnica. GET /auth/me v
 
 identity-bff tiene dos consumidores Next.js reales; sin paquetes vacíos, módulos comerciales ni worker. Organizations contiene Tenant/BusinessGroup/Company/Branch/OU con integridad transaccional, sin rutas públicas. Sin Membership, RBAC, RLS ni UoW genérico. Keycloak conserva cuentas y contraseñas empresariales; UserIdentity solo referencia issuer/sub con UUID propio. Integridad por tenant no equivale a autorización ni aislamiento de lectura.
 
+## Primer RLS de Memberships — 2.1
+
+No hay variables, dependencias ni contraseñas nuevas. Para una instalación existente, detener los servidores de desarrollo antes de actualizar código/migración; conservar `.env`, volúmenes y sesiones. Ejecutar `pnpm install --frozen-lockfile`, `pnpm db:run`, `pnpm db:show` y reiniciar con `pnpm dev`. MembershipIdentityRls1793008800000 activa ENABLE/FORCE RLS sin cambiar filas, FK, grants ni migraciones previas. Los comandos de bootstrap/provisionamiento siguen separados y con sus propias credenciales. No deshabilitar RLS para resolver errores de la aplicación.
+
+AuthenticationModule valida el JWT antes de ejecutar servicios. IdentityReadTransactions.read recibe ese Principal confiable y abre una transacción app REPEATABLE READ/READ ONLY. Inicializa LOCAL vacío, busca el UUID existente mediante IdentityModule y fija innoview.user_identity_id con set_config(..., true); no acepta UUID desde el navegador ni registra identidades. La operación usa el mismo EntityManager; sin identidad válida/local no se ejecuta. ContextModule consulta pertenencias y disponibilidad organizacional dentro de ese scope, conservando el contrato del selector.
+
+La política compara el UUID de fila como texto con el contexto: ausente, vacío, inválido/no canónico o de otra identidad → ninguna fila visible, sin cast inseguro. Funciona también para SQL directo sin WHERE, no depende de filtros TypeORM. Un usuario puede ver su historia REVOKED; el servicio sigue filtrando ACTIVE para seleccionar. No es una política de permisos empresariales ni de aislamiento Organizations.
+
+| Actor PostgreSQL        | Privilegios y políticas efectivos                                                                                                                                                                                                                                          |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Aplicación API          | SELECT de membership únicamente para identidad contextual; política restrictiva adicional impide que otra SELECT permisiva amplíe el límite. Sin INSERT/UPDATE/DELETE/DDL, ownership, SUPERUSER, BYPASSRLS ni SET ROLE operativo                                           |
+| Operador Memberships    | Políticas propias SELECT completo, INSERT y UPDATE; ACL siguen limitando UPDATE a status/updated_at. Triggers invocantes exigen contexto operativo y generan auditoría atómica. Sin DELETE/DDL/SUPERUSER/BYPASSRLS; no lee tablas privadas Identity/Organizations/sesiones |
+| Migrador                | Propietario DDL, sin SUPERUSER/BYPASSRLS. FORCE lo sujeta a RLS para DML y no tiene política de lectura de membership; no usarlo como observador de datos ni credencial HTTP. Sí puede cambiar DDL/políticas, por lo que sigue siendo un actor confiable                   |
+| Bootstrap               | Administrador existente, solo aprovisionamiento local controlado; nunca lookup inicial de identidad, consultas de aislamiento ni runtime                                                                                                                                   |
+| Portal / Control Center | Conservan acceso a sus sesiones, sin acceso al esquema Memberships ni credenciales operativas                                                                                                                                                                              |
+
+Una consulta app fuera del scope transaccional devuelve colección vacía/false aunque reciba un user_identity_id correcto. Pasar siempre el manager del scope a los contratos de lectura; no compartirlo entre solicitudes. LOCAL se retira automáticamente al confirmar/revertir, antes de devolver la conexión al pool. No usar SET SESSION: su valor se restauraría tras finalizar un LOCAL. La garantía se verifica con el mismo pg_backend_pid en un pool de una conexión, cambios de identidad, rollback y concurrencia.
+
+**Límite de confianza:** el GUC no autentica. Un atacante con SQL arbitrario en esa misma conexión puede cambiarlo y suplantar una identidad. RLS no sustituye validación JWT, autorización NestJS futura, consultas parametrizadas ni separación de secretos. El helper es un contrato backend confiable, no un verificador JWT alternativo. No hay SECURITY DEFINER ni BYPASSRLS para resolver el UUID inicial. Organizations continúa sin RLS y la selección Portal sigue siendo solo preferencia.
+
+FK/UNIQUE/PK verifican integridad global incluso sobre filas ocultas; los SELECT explícitos de triggers obedecen al actor. Las políticas del operador permiten contar todo el historial para bootstrap/idempotencia. Auditoría permanece privada por ACL y triggers. Una prueba fuerza rechazo RLS en la segunda escritura de una transacción y verifica que tampoco persistan la primera ni sus eventos. No exponer diagnósticos SQL por HTTP: las restricciones pueden revelar existencia a escritores confiables. Operación y decisión completas: ADR-035.
+
+`pnpm test` mantiene CLI bootstrap real, PostgreSQL/Keycloak descartables, JWT concurrentes, navegador real, login/logout/refresh y aislamiento de secretos. Agrega SQL directo sin filtros/joins, contextos inválidos, mismo pool tras commit/rollback, identidad sin pertenencias, límites restrictivos y FK bajo FORCE. Son pruebas de **aislamiento RLS de Memberships por identidad**, no de autorización empresarial, RBAC o RLS de tenants/empresas/sucursales. No avanzar a 2.2 sin revisión.
+
 ## Contexto y selector mínimo Portal — 1.6
 
 En una instalación existente, conservar `.env`, claves y volúmenes; ejecutar `pnpm db:run` y `pnpm db:show`. No se agregan secretos ni roles. PortalContext1793001600000 agrega únicamente selected_tenant_id y context_revision a portal_sessions.sessions; no cambia Control Center ni entidades empresariales.
@@ -128,7 +152,7 @@ El navegador usa únicamente el BFF Portal:
 
 La cookie sigue conteniendo solo SID opaco sellado. El UUID elegido está exclusivamente en la fila técnica de sesión Portal, sin FK empresarial ni claim permanente. Su revisión optimista es independiente de la versión/lease de tokens: refresh no sobrescribe contexto y seleccionar no reescribe tokens. Logout elimina la fila completa. La invalidación automática de un UUID obsoleto en GET es mantenimiento derivado de PostgreSQL, sin candidatos aceptados ni posibilidad de limpiar una selección válida por parámetros. Ante errores de comprobación no se devuelve contexto como válido.
 
-**La selección no concede permisos ni es autoridad para operaciones empresariales.** Cada operación futura deberá revalidar pertenencia, estados y permisos en su propia transacción. Una comprobación en curso ve su snapshot; una revocación confirmada se observa en comprobaciones nuevas, no cancela retroactivamente solicitudes ya iniciadas. No hay RLS ni contexto GUC definitivo: ADR-032/034 describen la integración futura, sin bypass.
+**La selección no concede permisos ni es autoridad para operaciones empresariales.** Cada operación futura deberá revalidar pertenencia, estados y permisos en su propia transacción. Una comprobación en curso ve su snapshot; una revocación confirmada se observa en comprobaciones nuevas, no cancela retroactivamente solicitudes ya iniciadas. 2.1 añade contexto de identidad y RLS Memberships según ADR-035; no hay todavía contexto tenant definitivo ni RLS Organizations.
 
 Pruebas: `pnpm test` incluye PostgreSQL/Keycloak descartables, concurrencia, refresh, logout, aislamiento de procesos y Chromium real interactuando con el selector y ambas aplicaciones. **Playwright 1.64.1** es una dependencia exclusiva de pruebas compatible con Node 24; no agrega runtime ni un segundo framework de tests. Instalar su Chromium headless con el comando del inicio; en una máquina Linux nueva usar `pnpm exec playwright install --with-deps --only-shell chromium`. CI fija Ubuntu 24.04 (bibliotecas de navegador preinstaladas), descarga solo Chromium y verifica su arranque antes de las pruebas; instalación limitada a cinco minutos, sin actualizar fuentes/paquetes OS ajenos. No se guardan trazas ni diagnósticos con credenciales. Los clientes/usuarios de prueba solo existen en Keycloak descartable.
 
@@ -354,4 +378,4 @@ También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/
 
 [GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL/Keycloak temporales con contraseñas aleatorias y los detiene al terminar. No depende de servicios locales ni secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
 
-Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Próximas fases: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No iniciar Fase 2 ni declarar cerrada Fase 1 sin revisión de 1.6.**
+Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Fases 0/1 cerradas por el usuario; estado y siguientes incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No avanzar a 2.2 ni implementar RBAC sin revisión de 2.1.**

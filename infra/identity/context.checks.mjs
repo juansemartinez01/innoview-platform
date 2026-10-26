@@ -145,6 +145,56 @@ export async function verifyContext(t, h) {
       },
     );
     await t.test(
+      'RLS runtime: concurrent verified JWT identities and direct unfiltered application SQL stay isolated',
+      async () => {
+        const other = stores[0].unseal(await storedSession(second, 0));
+        sensitive.push(other.access, other.refresh, other.idToken);
+        await Promise.all(
+          Array.from({ length: 24 }, async (_, index) => {
+            const useA = index % 2 === 0;
+            const response = await api(
+              '/context/options',
+              useA ? payload.access : other.access,
+            );
+            assert.equal(response.status, 200);
+            const body = await collect(response);
+            assert.deepEqual(
+              new Set(body.options.map((item) => item.id)),
+              new Set(useA ? [a.tenant.id, b.tenant.id] : [c.tenant.id]),
+            );
+          }),
+        );
+        assert.deepEqual(
+          await source.query('SELECT * FROM memberships.membership'),
+          [],
+        );
+        await source.transaction(async (manager) => {
+          // Test fixture UUID obtained from authenticated /auth/session, not a new
+          // HTTP parameter or a production authority for establishing context.
+          await manager.query(
+            "SELECT set_config('innoview.user_identity_id',$1,true)",
+            [identityA],
+          );
+          const rows = await manager.query(
+            'SELECT user_identity_id FROM memberships.membership',
+          );
+          assert.equal(rows.length, 2);
+          assert.ok(rows.every((row) => row.user_identity_id === identityA));
+          assert.deepEqual(
+            await manager.query(
+              'SELECT * FROM memberships.membership WHERE user_identity_id=$1',
+              [identityB],
+            ),
+            [],
+          );
+        });
+        assert.deepEqual(
+          await source.query('SELECT * FROM memberships.membership'),
+          [],
+        );
+      },
+    );
+    await t.test(
       'Context: real Chromium Portal selector changes, persists, clears and respects empty/Control Center views',
       async () => {
         await verifyContextBrowser({ env, userPassword, a, b });

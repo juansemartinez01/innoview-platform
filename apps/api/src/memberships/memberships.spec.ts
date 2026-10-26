@@ -6,7 +6,10 @@ import type { TestContext } from 'node:test';
 import type { DataSource, EntityManager } from 'typeorm';
 import pg from 'pg';
 import { OrganizationsService } from '../organizations/organizations.service.js';
-import { IdentityService } from '../identity/identity.module.js';
+import {
+  IdentityService,
+  IdentityReadTransactions,
+} from '../identity/identity.module.js';
 import {
   initializeApplicationDataSource,
   initializeMembershipOperatorDataSource,
@@ -59,20 +62,26 @@ export async function verifyMemberships(
         'Group C',
       )
     ).tenant.id;
-    const identityA = (
-      await identities.resolve({
-        issuer: 'https://fixture.invalid',
-        subject: randomUUID(),
-        clientId: 'test',
-      })
-    ).id;
-    const identityB = (
-      await identities.resolve({
-        issuer: 'https://fixture.invalid',
-        subject: randomUUID(),
-        clientId: 'test',
-      })
-    ).id;
+    const principalA = {
+      issuer: 'https://fixture.invalid',
+      subject: randomUUID(),
+      clientId: 'innoview-portal',
+    };
+    const principalB = { ...principalA, subject: randomUUID() };
+    const identityA = (await identities.resolve(principalA)).id;
+    const identityB = (await identities.resolve(principalB)).id;
+    const transactions = new IdentityReadTransactions(app, identities);
+    async function scoped<T>(
+      id: string,
+      operation: (manager: EntityManager) => Promise<T>,
+    ): Promise<T> {
+      const result = await transactions.read(
+        id === identityA ? principalA : principalB,
+        operation,
+      );
+      assert.notEqual(result, null);
+      return result!;
+    }
     async function raw(
       sql: string,
       params: unknown[] = [],
@@ -102,10 +111,34 @@ export async function verifyMemberships(
         membershipA = requests[0].membership.id;
         await writes.register(tenantA, identityB, context());
         await writes.register(tenantB, identityA, context());
-        assert.equal((await reads.listActiveForIdentity(identityA)).length, 2);
-        assert.equal((await reads.listActiveForIdentity(identityB)).length, 1);
-        assert.equal(await reads.isActive(tenantA, identityA), true);
-        assert.equal(await reads.isActive(tenantB, identityB), false);
+        assert.equal(
+          (
+            await scoped(identityA, (manager) =>
+              reads.listActiveForIdentity(identityA, manager),
+            )
+          ).length,
+          2,
+        );
+        assert.equal(
+          (
+            await scoped(identityB, (manager) =>
+              reads.listActiveForIdentity(identityB, manager),
+            )
+          ).length,
+          1,
+        );
+        assert.equal(
+          await scoped(identityA, (manager) =>
+            reads.isActive(tenantA, identityA, manager),
+          ),
+          true,
+        );
+        assert.equal(
+          await scoped(identityB, (manager) =>
+            reads.isActive(tenantB, identityB, manager),
+          ),
+          false,
+        );
         assert.deepEqual(await reads.listForIdentity(randomUUID()), []);
       },
     );
@@ -153,9 +186,11 @@ export async function verifyMemberships(
     await t.test(
       'Memberships: revocation is terminal, repeated concurrent revokes preserve first audit and subsequent reads reject it',
       async () => {
-        const before = (await reads.listForIdentity(identityA)).find(
-          (m) => m.id === membershipA,
-        )!;
+        const before = (
+          await scoped(identityA, (manager) =>
+            reads.listForIdentity(identityA, manager),
+          )
+        ).find((m) => m.id === membershipA)!;
         const results = await Promise.all(
           Array.from({ length: 8 }, () =>
             writes.revoke(tenantA, identityA, context()),
@@ -172,9 +207,28 @@ export async function verifyMemberships(
             before.createdAt.getTime(),
           );
         }
-        assert.equal(await reads.isActive(tenantA, identityA), false);
-        assert.equal((await reads.listForIdentity(identityA)).length, 2);
-        assert.equal((await reads.listActiveForIdentity(identityA)).length, 1);
+        assert.equal(
+          await scoped(identityA, (manager) =>
+            reads.isActive(tenantA, identityA, manager),
+          ),
+          false,
+        );
+        assert.equal(
+          (
+            await scoped(identityA, (manager) =>
+              reads.listForIdentity(identityA, manager),
+            )
+          ).length,
+          2,
+        );
+        assert.equal(
+          (
+            await scoped(identityA, (manager) =>
+              reads.listActiveForIdentity(identityA, manager),
+            )
+          ).length,
+          1,
+        );
         await assert.rejects(
           writes.register(tenantA, identityA, context()),
           (e) => state(e, 'REVOKED_TERMINAL'),
@@ -271,12 +325,12 @@ export async function verifyMemberships(
               r.db_actor === env.DB_MEMBERSHIP_USER,
           ),
         );
-        await assert.rejects(
-          migrator.query('DELETE FROM memberships.membership WHERE id=$1', [
-            membershipA,
-          ]),
-          (e) => state(e, '42501'),
+        const [removed, affected] = await migrator.query<[unknown[], number]>(
+          'DELETE FROM memberships.membership WHERE id=$1 RETURNING id',
+          [membershipA],
         );
+        assert.deepEqual(removed, []);
+        assert.equal(affected, 0);
         await assert.rejects(
           migrator.query(
             'DELETE FROM memberships.audit_event WHERE membership_id=$1',
@@ -289,7 +343,12 @@ export async function verifyMemberships(
         await assert.rejects(writes.register(tenantB, identityB, op), (e) =>
           state(e, 'REQUEST_CONFLICT'),
         );
-        assert.equal(await reads.isActive(tenantB, identityB), false);
+        assert.equal(
+          await scoped(identityB, (manager) =>
+            reads.isActive(tenantB, identityB, manager),
+          ),
+          false,
+        );
       },
     );
     await t.test(
@@ -353,9 +412,11 @@ export async function verifyMemberships(
         ]);
         assert.match(event.actor, /^host:.+\/user:.+$/);
         assert.equal(event.source, 'BOOTSTRAP');
-        const member = (await reads.listActiveForIdentity(identityA)).find(
-          (m) => m.tenantId === tenantC,
-        )!;
+        const member = (
+          await scoped(identityA, (manager) =>
+            reads.listActiveForIdentity(identityA, manager),
+          )
+        ).find((m) => m.tenantId === tenantC)!;
         assert.deepEqual(
           Object.keys(
             JSON.parse(JSON.stringify(member)) as Record<string, unknown>,
@@ -395,7 +456,12 @@ export async function verifyMemberships(
           (JSON.parse(after.stdout) as { status: string }).status,
           'REVOKED',
         );
-        assert.equal(await reads.isActive(tenantC, identityA), false);
+        assert.equal(
+          await scoped(identityA, (manager) =>
+            reads.isActive(tenantC, identityA, manager),
+          ),
+          false,
+        );
         for (const password of [
           env.DB_MEMBERSHIP_PASSWORD!,
           env.DB_APP_PASSWORD!,
@@ -541,7 +607,12 @@ export async function verifyMemberships(
           }),
           (e) => state(e, '23505'),
         );
-        assert.equal(await reads.isActive(tenantB, identityB), false);
+        assert.equal(
+          await scoped(identityB, (manager) =>
+            reads.isActive(tenantB, identityB, manager),
+          ),
+          false,
+        );
       },
     );
     await t.test(

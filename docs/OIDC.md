@@ -1,6 +1,6 @@
 # Identity — contrato OIDC y runtime BFF
 
-1.1–1.5 aprobados, incluido hardening 27cb6c7; contrato OIDC v2 vigente. 1.6 agrega contexto validado y preferencia de navegación solo en sesión Portal, sin cambios de issuer, audiencias, clientes, scopes ni claims. Control Center permanece técnico, sin selector/administración autorizada. No hay RBAC ni RLS. README y ADR-034 detallan contratos y límites; Fase 1 pendiente de revisión.
+Fase 1 aprobada/cerrada en b04cd26/e2aaf61; contrato OIDC v2 vigente. 2.1 deriva UUID interno del Principal ya validado para contexto SQL LOCAL y RLS de Memberships, sin cambiar issuer, audiencias, clientes, scopes, tokens o sesiones. Control Center permanece técnico. No hay RBAC, contexto tenant definitivo ni RLS Organizations. README/ADR-035 fijan el modelo de confianza: el GUC no valida JWT ni resiste SQL arbitrario.
 
 ## Autoridad, clientes y scopes
 

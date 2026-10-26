@@ -2,7 +2,10 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { TestContext } from 'node:test';
 import type { DataSource } from 'typeorm';
-import { IdentityService } from '../identity/identity.module.js';
+import {
+  IdentityService,
+  IdentityReadTransactions,
+} from '../identity/identity.module.js';
 import { MembershipsService } from '../memberships/memberships.service.js';
 import { OrganizationsService } from '../organizations/organizations.service.js';
 import { initializeMembershipOperatorDataSource } from '../persistence/data-sources.js';
@@ -20,9 +23,9 @@ export async function verifyContextPersistence(
     const memberships = new MembershipsService(app);
     const trusted = new MembershipsService(operator);
     const organizations = new OrganizationsService(app);
+    const transactions = new IdentityReadTransactions(app, identities);
     const contexts = new ContextService(
-      app,
-      identities,
+      transactions,
       memberships,
       organizations,
     );
@@ -51,8 +54,7 @@ export async function verifyContextPersistence(
       'Context: module read contracts share one read-only snapshot across a concurrent revocation and organization change',
       async () => {
         assert.equal((await contexts.options(principal)).length, 2);
-        await app.transaction('REPEATABLE READ', async (manager) => {
-          await manager.query('SET TRANSACTION READ ONLY');
+        await transactions.read(principal, async (manager) => {
           assert.equal(
             await identities.findReference(principal, manager),
             identity.id,

@@ -75,6 +75,16 @@ Sin FK entre la preferencia técnica y Organizations: conocer/persistir UUID no 
 
 La escritura CAS compara context_revision y vigencia de la sesión; incrementa únicamente esa revisión/selección. El payload cifrado de tokens, version y lease no se reescriben al seleccionar, y refresh no toca estas columnas. El borrado de sesión elimina contexto; una actualización tardía sin fila vigente no hace INSERT. Un GET que detecta selección ya no disponible limpia únicamente la revisión observada, reintentando si hubo otro cambio. No hay transacción abierta durante HTTP. Contratos, límites y fases futuras: README/ADR-032/034.
 
+## RLS de Memberships — 2.1
+
+MembershipIdentityRls1793008800000 no cambia entidades, datos, FK, historial ni ACL: habilita/ fuerza RLS en memberships.membership y crea cinco políticas explícitas por actor gestionado. API: SELECT de identidad transaccional más límite restrictivo; operador: SELECT completo, INSERT y UPDATE; migrador: sin política DML bajo FORCE. audit_event continúa protegido por sus ACL y triggers, sin RLS nuevo; Organizations no tiene RLS todavía. No se crean roles ni permisos empresariales.
+
+Identidad contextual: innoview.user_identity_id, establecido LOCAL por IdentityReadTransactions tras buscar UUID existente del principal autenticado. Comparación user_identity_id::text = NULLIF(current_setting(..., true),'') sin convertir el contexto a UUID. Cero filas si no coincide una identidad canónica; no errores de conversión ni consultas a Identity dentro de la política. El índice UUID/status y los filtros internos siguen vigentes; la política no reemplaza el filtro ACTIVE de selección ni oculta al usuario su propio historial REVOKED.
+
+La visibilidad del operador preserva los SELECT invocantes del trigger de bootstrap y las escrituras/auditoría atómicas. FK/UNIQUE/PK conservan comprobaciones globales aunque el migrador no vea las filas por SELECT; RESTRICT no pierde eficacia. No considerar las restricciones un mecanismo de confidencialidad contra un escritor SQL confiable. Un rechazo de política revierte toda la operación y sus eventos. No modificar ni retirar RLS para operaciones habituales; usar el operador separado. Reversión del incremento solo en la fixture descartable mediante las protecciones existentes del CLI.
+
+GUC no constituye prueba criptográfica de identidad: SQL arbitrario puede suplantarlo. LOCAL y el mismo EntityManager aseguran limpieza en código confiable; quedan prohibidos SET SESSION, contextos provenientes del frontend y managers globales para consultas dependientes de identidad. Pruebas reales de mismo backend/pool, rollback, concurrencia y SQL sin WHERE documentan el alcance; no demuestran RBAC ni RLS de Organizations. ADR-035.
+
 ## Authorization — posterior
 
 - Permission: código estable namespaceado, p.ej. sales.orders.read; proviene de módulo.
