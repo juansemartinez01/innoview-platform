@@ -409,10 +409,12 @@ await test('real disposable Keycloak: reproducible OIDC contract, tokens and saf
       try {
         await request('realms/master', {
           method: 'PUT',
-          body: { ...master, accessTokenLifespan: 1 },
+          // Remaining whole seconds can round down to zero with a one-second
+          // token on slower hosts. Still expire a real token before the request.
+          body: { ...master, accessTokenLifespan: 3 },
         });
         const shortLived = await administrator(config);
-        await new Promise((resolve) => setTimeout(resolve, 1500));
+        await new Promise((resolve) => setTimeout(resolve, 3500));
         const results = await Promise.all(
           Array.from({ length: 4 }, () => shortLived('realms/master')),
         );

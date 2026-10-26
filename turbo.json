@@ -15,5 +15,12 @@
       "persistent": true
     }
   },
-  "globalPassThroughEnv": ["DB_*", "AUTH_*", "OIDC_*", "PORTAL_*", "CONTROL_*"]
+  "globalPassThroughEnv": [
+    "DB_*",
+    "AUTH_*",
+    "OIDC_*",
+    "API_PORT",
+    "PORTAL_*",
+    "CONTROL_*"
+  ]
 }

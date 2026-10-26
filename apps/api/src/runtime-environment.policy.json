@@ -1,0 +1,48 @@
+{
+  "configuration": [
+    "DB_HOST",
+    "DB_PORT",
+    "DB_NAME",
+    "DB_SSL",
+    "DB_APP_USER",
+    "DB_APP_PASSWORD",
+    "OIDC_ISSUER",
+    "AUTH_ENV",
+    "AUTH_ALLOW_HTTP",
+    "API_PORT",
+    "NODE_ENV"
+  ],
+  "system": [
+    "PATH",
+    "SYSTEMROOT",
+    "SYSTEMDRIVE",
+    "WINDIR",
+    "COMSPEC",
+    "PATHEXT",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "HOME",
+    "USERPROFILE",
+    "APPDATA",
+    "LOCALAPPDATA",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "LOGONSERVER",
+    "USERDOMAIN",
+    "USERNAME"
+  ],
+  "forbiddenPrefixes": [
+    "DB_",
+    "PLATFORM_",
+    "IDENTITY_",
+    "KEYCLOAK_",
+    "KC_",
+    "POSTGRES_",
+    "PG",
+    "TEST_",
+    "PORTAL_",
+    "CONTROL_",
+    "DOTENV_CONFIG_"
+  ]
+}

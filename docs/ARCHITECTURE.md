@@ -80,6 +80,8 @@ La clase base OrganizationRecord solo comparte columnas entre sus dos consumidor
 
 ## Memberships — 1.5
 
+Corrección de aislamiento de credenciales (ADR-033): API dev/start usan launcher confiable que crea otro proceso con configuración permitida y entorno OS mínimo explícito. CLI Nest/watch y servidor compilado no cargan `.env` ni heredan credenciales operativas, BFF o testing. `main` valida configuración antes de importar NestJS; el DataSource exige rol app gestionado. Herramientas operativas permanecen separadas del servidor. README detalla lista, comandos y límite de seguridad del mismo usuario/archivos locales; no es un sandbox ni un despliegue de producción.
+
 MembershipsModule es dueño de membership y audit_event en esquema memberships. Las referencias FK a Tenant.id y UserIdentity.id son contratos explícitos entre subdominios; el servicio no consulta sus tablas privadas ni duplica sus datos. Los identificadores proceden de referencias internas verificadas: en bootstrap son UUID seleccionados por el operador confiable y comprobados por FK; un futuro consumidor HTTP deberá derivar UserIdentity de la autenticación validada, nunca de email/body/claims de pertenencia.
 
 El provider NestJS usa el DataSource de aplicación con SELECT únicamente sobre membership. Las operaciones internas de escritura requieren un DataSource separado de propósito membership, credencial operativa marcada y privilegios exactos; no se inyecta al runtime público. Bootstrap CLI fuera de HTTP emplea ese rol, sin credenciales administrativas/migrador ni roles empresariales. No hay controllers. ACTIVE→REVOKED terminal, unicidad histórica de pareja y auditoría en el mismo commit; detalle y operación en ADR-031/README.

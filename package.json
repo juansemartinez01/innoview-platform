@@ -20,7 +20,7 @@
     "lint": "eslint . --max-warnings=0",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
-    "test": "pnpm -r --if-present test && pnpm --filter @innoview/identity-bff build && pnpm --filter @innoview/api build && node --env-file-if-exists=.env --test --test-concurrency=1 infra/keycloak/oidc.test.mjs infra/identity/runtime.test.mjs",
+    "test": "pnpm -r --if-present test && pnpm --filter @innoview/identity-bff build && pnpm --filter @innoview/api build && node --env-file-if-exists=.env --test --test-concurrency=1 infra/api/environment.test.mjs infra/keycloak/oidc.test.mjs infra/identity/runtime.test.mjs",
     "oidc:provision": "node --env-file-if-exists=.env infra/keycloak/cli.mjs provision",
     "oidc:check": "node --env-file-if-exists=.env infra/keycloak/cli.mjs check",
     "db:provision": "pnpm --filter @innoview/api db:provision",

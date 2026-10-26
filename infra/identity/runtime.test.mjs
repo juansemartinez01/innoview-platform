@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { randomBytes, randomUUID } from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import policy from '../../apps/api/src/runtime-environment.policy.json' with { type: 'json' };
 import { once } from 'node:events';
 import { setTimeout as pause } from 'node:timers/promises';
 import { createRequire } from 'node:module';
@@ -143,31 +144,81 @@ await test(
     let created = false;
     let realmCreated = false;
     let migrator;
-    async function launch(app, args) {
-      // Runtime processes receive only their required credentials, never bootstrap,
-      // migrator or Keycloak administrator secrets, nor the other BFF's keys.
-      const runtime = { ...env };
-      for (const key of Object.keys(runtime))
-        if (/PASSWORD|_USER$/.test(key)) delete runtime[key];
-      const prefix =
-        app === 'api'
-          ? 'DB_APP'
-          : app === 'portal'
-            ? 'DB_PORTAL'
-            : 'DB_CONTROL';
-      runtime[`${prefix}_USER`] = env[`${prefix}_USER`];
-      runtime[`${prefix}_PASSWORD`] = env[`${prefix}_PASSWORD`];
-      if (app !== 'api') {
-        const group = app === 'portal' ? 'PORTAL' : 'CONTROL';
-        runtime[`${group}_COOKIE_PASSWORD`] = env[`${group}_COOKIE_PASSWORD`];
-        runtime[`${group}_TOKEN_PASSWORD`] = env[`${group}_TOKEN_PASSWORD`];
+    function runtimeKeys(output, prefix) {
+      const marker = `${prefix} runtime admitted variables: `;
+      return output
+        .join('')
+        .split(/\r?\n/)
+        .filter((line) => line.startsWith(marker))
+        .map((line) => JSON.parse(line.slice(marker.length)));
+    }
+    function assertRuntimeKeys(output, prefix) {
+      const records = runtimeKeys(output, prefix);
+      assert.ok(
+        records.length > 0,
+        'The actual NestJS process must report admitted key names',
+      );
+      const allowed = new Set([...policy.configuration, ...policy.system]);
+      for (const keys of records) {
+        assert.deepEqual(
+          keys.filter((key) => !allowed.has(key.toUpperCase())),
+          [],
+          'Unexpected API runtime variable names',
+        );
+        for (const key of [
+          'DB_APP_USER',
+          'DB_APP_PASSWORD',
+          'DB_HOST',
+          'DB_NAME',
+          'OIDC_ISSUER',
+          'AUTH_ENV',
+          'API_PORT',
+        ])
+          assert.ok(keys.includes(key));
       }
-      const child = spawn(process.execPath, args, {
-        cwd: `${root}/apps/${app}`,
-        env: runtime,
-        windowsHide: true,
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
+    }
+    async function stop(child) {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      const exited = once(child, 'exit');
+      if (process.platform === 'win32') {
+        spawnSync('taskkill', ['/PID', String(child.pid), '/T', '/F'], {
+          windowsHide: true,
+          stdio: 'ignore',
+        });
+      } else {
+        try {
+          process.kill(-child.pid, 'SIGTERM');
+        } catch {
+          /* stopped */
+        }
+      }
+      await Promise.race([exited, pause(10000)]);
+      assert.ok(
+        child.exitCode !== null || child.signalCode !== null,
+        'Runtime command must terminate with its child tree',
+      );
+    }
+    async function launch(app, mode, args = []) {
+      // Use the exact package commands with the complete fixture environment.
+      // The launchers, not the test harness, must isolate their HTTP processes.
+      assert.ok(process.env.npm_execpath, 'Run through pnpm test');
+      const child = spawn(
+        process.execPath,
+        [
+          process.env.npm_execpath,
+          '--filter',
+          `@innoview/${app}`,
+          mode,
+          ...args,
+        ],
+        {
+          cwd: root,
+          env: { ...env, UNEXPECTED_RUNTIME_SECRET: secret() },
+          windowsHide: true,
+          detached: process.platform !== 'win32',
+          stdio: ['ignore', 'pipe', 'pipe'],
+        },
+      );
       children.push(child);
       child.stdout.on('data', (chunk) => logs.push(chunk.toString()));
       child.stderr.on('data', (chunk) => logs.push(chunk.toString()));
@@ -184,7 +235,7 @@ await test(
           );
         try {
           if ((await fetch(origin, { signal: AbortSignal.timeout(2000) })).ok)
-            return;
+            return child;
         } catch {
           /* wait for binding */
         }
@@ -389,23 +440,74 @@ await test(
         ).status,
         201,
       );
-      await launch('api', ['dist/main.js']);
-      await launch('portal', [
-        'node_modules/next/dist/bin/next',
-        'dev',
-        '--hostname',
-        '127.0.0.1',
-        '--port',
-        '13000',
-      ]);
-      await launch('control-center', [
-        'node_modules/next/dist/bin/next',
-        'dev',
-        '--hostname',
-        '127.0.0.1',
-        '--port',
-        '13001',
-      ]);
+      await t.test(
+        'normal pnpm API dev starts a restricted Nest child without privileged credentials',
+        async () => {
+          const offset = logs.length;
+          const child = await launch('api', 'dev');
+          try {
+            assertRuntimeKeys(logs.slice(offset), 'API');
+            const roles = await bootstrap.query(
+              'SELECT 1 FROM pg_stat_activity WHERE datname=$1 AND usename=$2',
+              [database, env.DB_APP_USER],
+            );
+            assert.ok(roles.rowCount > 0);
+            assert.equal(
+              (await fetch(`${env.AUTH_API_ORIGIN}/auth/me`)).status,
+              401,
+            );
+          } finally {
+            await stop(child);
+          }
+        },
+      );
+      const compiledOffset = logs.length;
+      await launch('api', 'start');
+      await launch('portal', 'dev', ['--port', '13000']);
+      await launch('control-center', 'dev', ['--port', '13001']);
+      await t.test(
+        'normal compiled API and both BFF launchers preserve credential separation',
+        async () => {
+          assertRuntimeKeys(logs.slice(compiledOffset), 'API');
+          const actualRoles = await bootstrap.query(
+            'SELECT usename FROM pg_stat_activity WHERE datname=$1 AND usename=$2',
+            [database, env.DB_APP_USER],
+          );
+          assert.ok(actualRoles.rowCount > 0);
+          const rights = await migrator.query(
+            "SELECT has_table_privilege($1,'memberships.membership','INSERT') OR has_table_privilege($1,'memberships.membership','UPDATE') OR has_table_privilege($1,'memberships.membership','DELETE') AS writes",
+            [env.DB_APP_USER],
+          );
+          assert.equal(rights[0].writes, false);
+          const records = runtimeKeys(logs, 'BFF');
+          assert.ok(records.length >= 2);
+          for (const keys of records) {
+            assert.ok(
+              !keys.some((key) =>
+                /^(DB_(BOOTSTRAP|MIGRATOR|MEMBERSHIP|APP)_|KEYCLOAK_|IDENTITY_|PLATFORM_|TEST_)/.test(
+                  key,
+                ),
+              ),
+            );
+            const prefix = keys.includes('DB_PORTAL_USER')
+              ? 'PORTAL'
+              : 'CONTROL';
+            const other = prefix === 'PORTAL' ? 'CONTROL' : 'PORTAL';
+            assert.ok(keys.includes(`DB_${prefix}_PASSWORD`));
+            assert.ok(keys.includes(`${prefix}_COOKIE_PASSWORD`));
+            assert.ok(keys.includes(`${prefix}_TOKEN_PASSWORD`));
+            assert.ok(
+              !keys.some(
+                (key) =>
+                  key.startsWith(`DB_${other}_`) || key.startsWith(`${other}_`),
+              ),
+            );
+            assert.ok(
+              !keys.includes('NODE_OPTIONS') && !keys.includes('NODE_PATH'),
+            );
+          }
+        },
+      );
       const portal = new Browser(env.PORTAL_ORIGIN);
       const control = new Browser(env.CONTROL_ORIGIN);
       let portalData;
@@ -1135,8 +1237,7 @@ await test(
       );
     } finally {
       for (const child of children) {
-        child.kill();
-        await Promise.race([once(child, 'exit').catch(() => {}), pause(5000)]);
+        await stop(child);
       }
       for (const store of stores)
         if (store.source.isInitialized) await store.source.destroy();

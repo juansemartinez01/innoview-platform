@@ -2,8 +2,18 @@
 // flags to workers through NODE_OPTIONS, which rejects that flag on Node 24.
 import { loadEnvFile } from 'node:process';
 import { fileURLToPath } from 'node:url';
+import { parseArgs } from 'node:util';
 
-const [app, mode] = process.argv.slice(2);
+const [app, mode, ...args] = process.argv.slice(2);
+const { values } = parseArgs({
+  args,
+  options: { port: { type: 'string' } },
+  strict: true,
+  allowPositionals: false,
+});
+const port = values.port ?? (app === 'portal' ? '3000' : '3001');
+if (!/^\d+$/.test(port) || Number(port) < 1 || Number(port) > 65535)
+  throw new Error('Invalid frontend port');
 if (
   !['portal', 'control-center'].includes(app) ||
   !['dev', 'start'].includes(mode)
@@ -30,6 +40,7 @@ for (const suffix of ['COOKIE_PASSWORD', 'TOKEN_PASSWORD']) {
 const prefix = app === 'portal' ? 'PORTAL' : 'CONTROL';
 for (const key of Object.keys(process.env)) {
   if (
+    ['NODE_OPTIONS', 'NODE_PATH'].includes(key.toUpperCase()) ||
     /^(KEYCLOAK_|TEST_|PLATFORM_|IDENTITY_)/.test(key) ||
     (/^DB_/.test(key) &&
       ![
@@ -44,6 +55,9 @@ for (const key of Object.keys(process.env)) {
   )
     delete process.env[key];
 }
+console.info(
+  `BFF runtime admitted variables: ${JSON.stringify(Object.keys(process.env).sort())}`,
+);
 const cli = new URL(
   `../../apps/${app}/node_modules/next/dist/bin/next`,
   import.meta.url,
@@ -55,6 +69,6 @@ process.argv = [
   '--hostname',
   '127.0.0.1',
   '--port',
-  app === 'portal' ? '3000' : '3001',
+  port,
 ];
 await import(cli.href);

@@ -4,9 +4,9 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "node --env-file-if-exists=../../.env node_modules/@nestjs/cli/bin/nest.js start --watch",
+    "dev": "node ../../infra/api/runtime.mjs dev",
     "build": "tsc -p tsconfig.build.json",
-    "start": "node --env-file-if-exists=../../.env dist/main.js",
+    "start": "node ../../infra/api/runtime.mjs start",
     "typecheck": "tsc --noEmit",
     "test": "tsc -p tsconfig.test.json && node --env-file-if-exists=../../.env --test dist-test/persistence/persistence.spec.js",
     "db:provision": "pnpm build && node --env-file-if-exists=../../.env dist/persistence/provision.cli.js",
