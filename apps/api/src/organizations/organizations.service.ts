@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { operationFingerprint } from '../operations/fingerprint.js';
 import type { OrganizationOperation } from '../operations/trusted-operation.js';
 import {
   canonicalUuid,
@@ -97,15 +97,7 @@ export class OrganizationsService {
       const requestId = this.uuid(context.requestId);
       const actor = context.actor.trim(),
         reason = context.reason.trim();
-      // Versioned, flat arguments with stable key order; omission is explicitly tagged.
-      const canonical = JSON.stringify({
-        version: 1,
-        type,
-        args: Object.fromEntries(
-          Object.entries(args).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
-        ),
-      });
-      const fingerprint = createHash('sha256').update(canonical).digest('hex');
+      const fingerprint = operationFingerprint(2, type, args);
       const result = await this.source.transaction(
         'READ COMMITTED',
         async (manager) => {
@@ -125,8 +117,8 @@ export class OrganizationsService {
               [tenantId],
             );
           const inserted = await manager.query<{ request_id: string }[]>(
-            `INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(request_id) DO NOTHING RETURNING request_id`,
+            `INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source,fingerprint_version)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,2) ON CONFLICT(request_id) DO NOTHING RETURNING request_id`,
             [
               requestId,
               tenantId,
@@ -143,6 +135,7 @@ export class OrganizationsService {
             const [existing] = await manager.query<
               {
                 fingerprint: string;
+                fingerprint_version: number;
                 actor: string;
                 actor_type: string;
                 reason: string;
@@ -150,12 +143,17 @@ export class OrganizationsService {
                 completed_at: Date | null;
               }[]
             >(
-              'SELECT fingerprint,actor,actor_type,reason,result,completed_at FROM organizations.operation WHERE request_id=$1',
+              'SELECT fingerprint,fingerprint_version,actor,actor_type,reason,result,completed_at FROM organizations.operation WHERE request_id=$1',
               [requestId],
             );
             if (
               !existing ||
-              existing.fingerprint !== fingerprint ||
+              existing.fingerprint !==
+                operationFingerprint(
+                  existing.fingerprint_version,
+                  type,
+                  args,
+                ) ||
               existing.actor !== actor ||
               existing.actor_type !== context.actorType ||
               existing.reason !== reason

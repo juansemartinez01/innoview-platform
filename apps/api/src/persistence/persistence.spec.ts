@@ -1,3 +1,8 @@
+import {
+  versionOneFixture,
+  verifyVersionOneUpgrade,
+  verifyOperationHardening,
+} from './operation-hardening.spec.js';
 import { verifyHardening } from './hardening.spec.js';
 import { readdirSync } from 'node:fs';
 import { OrganizationsService } from '../organizations/organizations.service.js';
@@ -166,7 +171,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               (name) =>
                 name.endsWith('.js') &&
                 !name.includes('OrganizationsTenantRls') &&
-                !name.includes('OrganizationOperations'),
+                !name.includes('OrganizationOperations') &&
+                !name.includes('OperationTriggerHardening'),
             )
             .map((name) =>
               fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
@@ -221,7 +227,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               .filter(
                 (name) =>
                   name.endsWith('.js') &&
-                  !name.includes('OrganizationOperations'),
+                  !name.includes('OrganizationOperations') &&
+                  !name.includes('OperationTriggerHardening'),
               )
               .map((name) =>
                 fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
@@ -244,7 +251,28 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               [tid],
             );
           });
+          const nine = createDataSource('migrator', env);
+          nine.setOptions({
+            migrations: readdirSync(folder)
+              .filter(
+                (name) =>
+                  name.endsWith('.js') &&
+                  !name.includes('OperationTriggerHardening'),
+              )
+              .map((name) =>
+                fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
+              ),
+          });
+          await nine.initialize();
+          try {
+            assert.equal((await nine.runMigrations()).length, 1);
+          } finally {
+            await nine.destroy();
+          }
+          const v1 = await versionOneFixture(operator);
           assert.equal((await migrator.runMigrations()).length, 1);
+          await verifyVersionOneUpgrade(operator, v1);
+
           assert.equal(
             (
               await operator.transaction((manager) =>
@@ -287,7 +315,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               'SELECT count(*)::int AS n FROM platform_meta.migrations',
             )
           )[0].n,
-          9,
+          10,
         );
         assert.equal(await migrator.showMigrations(), false);
         const [owner] = await migrator.query<{ owner: string }[]>(
@@ -585,11 +613,29 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await verifyMembershipRls(t, app, migrator, env);
     await verifyOrganizationsRls(t, app, migrator, env);
     await verifyHardening(t, app, migrator, env);
+    await verifyOperationHardening(t, migrator, env);
 
     await t.test(
       'real migration reverts and reapplies only in this disposable database',
       async () => {
         assert.match(database, /^innoview_test_[a-f0-9]{32}$/);
+        const revertTriggerHardening = spawnSync(
+          process.execPath,
+          [
+            fileURLToPath(new URL('./migration.cli.js', import.meta.url)),
+            'revert',
+          ],
+          {
+            env: { ...process.env, ...env, DB_DISPOSABLE: 'true' },
+            encoding: 'utf8',
+            windowsHide: true,
+          },
+        );
+        assert.equal(
+          revertTriggerHardening.status,
+          0,
+          revertTriggerHardening.stderr,
+        );
         const revertOperations = spawnSync(
           process.execPath,
           [

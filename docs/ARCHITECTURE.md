@@ -1,5 +1,11 @@
 # Arquitectura técnica — v0.3
 
+## Corrección acotada — 2.3a.1
+
+2.3a aprobado con condiciones en 685a29c; 2.3a.1 implementado pendiente de revisión. ADR-038 agrega migración décima sin modificar decisiones/migraciones históricas: validación PL/pgSQL separada del cast UUID, búsquedas indexables en triggers, UPDATE ligado al request LOCAL, auditoría sin default de legado y huellas versionadas v1/v2. Compatibilidad de replay existente comprobada antes/después de migración con Tenant y Company, sin reinterpretar resultados.
+
+Provisioning añade solo lock_timeout (runtime/BFF/operadores 1s, migrador 3s; bootstrap independiente). Los límites anteriores siguen vigentes. Lock timeout no acota ejecución de DDL una vez adquirido ni reemplaza ventana de mantenimiento; encolamiento, rollback y reintento están en OPERATIONS_RUNBOOK.md. Prueba de planes con 20.000 filas técnicas, SQL y roles efectivos, sin índices/hints añadidos para forzar el resultado; prueba de migración fallida preserva esquema/historial y se reintenta al liberar la contención. No hay RBAC ni nuevos endpoints.
+
 ## Hardening transversal — 2.3a
 
 Base 2.2 aprobada en 9175804; 2.3a implementado pendiente de revisión. ADR-037 actualiza únicamente los contratos de escritura/auditoría y lectura Organizations y agrega límites/observabilidad/diagnósticos; no implementa RBAC. Los apartados 1.x/2.2 describen su estado histórico, extendido aquí.

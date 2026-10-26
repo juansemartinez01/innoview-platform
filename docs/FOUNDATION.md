@@ -4,7 +4,7 @@ Fecha de selección: 2026-10-24. No se cambia el stack acordado.
 
 ## Estado de cierre — 2026-10-25
 
-Fases 0/1 cerradas; 2.1 aprobado en 55a1b29. 2.2 aprobado en 9175804. 2.3a agrega operaciones/hardening (ADR-037), pendiente de revisión. Nueve migraciones. Sin RBAC. Este documento conserva evidencia histórica; operación actual en README.
+Fases 0/1 cerradas; 2.1 aprobado en 55a1b29. 2.2 aprobado en 9175804. 2.3a aprobado con condiciones en 685a29c; 2.3a.1 agrega corrección ADR-038, pendiente de revisión. Diez migraciones. Sin RBAC. Este documento conserva evidencia histórica; operación actual en README.
 
 | Incremento                   | Estado y evidencia                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------ |

@@ -541,14 +541,30 @@ export async function verifyHardening(
               statement: string;
               idle: string;
               transaction: string;
+              lock: string;
             }>(
-              "SELECT current_setting('statement_timeout') AS statement,current_setting('idle_in_transaction_session_timeout') AS idle,current_setting('transaction_timeout') AS transaction",
+              "SELECT current_setting('statement_timeout') AS statement,current_setting('idle_in_transaction_session_timeout') AS idle,current_setting('transaction_timeout') AS transaction,current_setting('lock_timeout') AS lock",
             );
             const expected = ['membership', 'organizations'].includes(purpose)
-              ? { statement: '20s', idle: '30s', transaction: '2min' }
+              ? {
+                  statement: '20s',
+                  idle: '30s',
+                  transaction: '2min',
+                  lock: '1s',
+                }
               : ['migrator', 'bootstrap'].includes(purpose)
-                ? { statement: '0', idle: '0', transaction: '0' }
-                : { statement: '5s', idle: '10s', transaction: '30s' };
+                ? {
+                    statement: '0',
+                    idle: '0',
+                    transaction: '0',
+                    lock: purpose === 'migrator' ? '3s' : '0',
+                  }
+                : {
+                    statement: '5s',
+                    idle: '10s',
+                    transaction: '30s',
+                    lock: '1s',
+                  };
             assert.deepEqual(settings, expected);
           } finally {
             await client.end();

@@ -1,6 +1,16 @@
 # Innoview Platform
 
-Fases 0 y 1 oficialmente cerradas; 2.1 y 2.2 aprobados hasta 9175804. Incremento **2.3a** implementado, pendiente de revisión: hardening transversal, auditoría e idempotencia. Sin RBAC, Authorization funcional ni endpoints administrativos. Las secciones anteriores conservan su contexto histórico; ADR-037 y el runbook describen los contratos actuales. No avanzar a 2.3b sin autorización.
+Fases 0 y 1 oficialmente cerradas; 2.1 y 2.2 aprobados hasta 9175804. **2.3a aprobado con condiciones en 685a29c; 2.3a.1 implementado, pendiente de revisión.** Sin RBAC, Authorization funcional ni endpoints administrativos. Los apartados anteriores conservan su contexto histórico; ADR-038 y el runbook describen la corrección vigente. No avanzar a 2.3b sin autorización.
+
+## Corrección 2.3a.1
+
+La décima migración OperationTriggerHardening1793030400000 mantiene el historial y reemplaza funciones sin modificar migraciones previas. Los triggers validan el GUC antes de convertirlo a UUID y consultan por PK indexable; inválido/ausente se rechaza con 42501 sin 22P02. Completar una operación exige el mismo request contextual. Auditoría nueva sin DEFAULT de legado y con technical_source obligatorio para procedencia verificada; filas históricas preservadas.
+
+Operaciones existentes conservan fingerprint_version=1 y su replay original; nuevas usan v2 recursiva, tipada y determinista, sin librerías nuevas. Se prueban Tenant y Company v1 creados en esquema anterior a la migración y reintentados después. Detener **todos los escritores** y aplicaciones para actualizar código/migración de forma coordinada; conservar `.env` y volúmenes. Ejecutar la secuencia de actualización del runbook: `pnpm install --frozen-lockfile`, `pnpm db:provision`, `pnpm db:run`, `pnpm db:provision`, `pnpm db:show`, `pnpm db:diagnose`, reiniciar con `pnpm dev`.
+
+lock_timeout en conexiones nuevas: API/BFF/operadores 1 s, migrador 3 s, bootstrap sin modificación. Otros límites sin cambios. Ante 55P03, resolver contención durante mantenimiento, comprobar rollback/historial y repetir la misma migración; no reintentar ciegamente DDL encolado. [Runbook](docs/OPERATIONS_RUNBOOK.md) detalla riesgos, versiones y recuperación.
+
+Resultado local: **120 resultados satisfactorios (75 PostgreSQL + 45 entorno/OIDC/runtime/Chromium)**, cero fallos. La prueba normal carga 20.000 operaciones únicamente en una base generada descartable y compara EXPLAIN JSON: antes Seq Scan, después Index Scan operation_pkey para ambas búsquedas; no usa tiempos de reloj como criterio ni fuerza planes. Pruebas adicionales de GUC inválido, UPDATE ajeno, constraints de auditoría y recuperación de locks/pools/DDL. No ejecutar esa carga sobre la base habitual. Alcance del operador, reasonCode futuro, consulta conjunta de registro/eventos, dependencia SQL de políticas, GUC alterables y advertencia TypeORM/pg permanecen abiertos (ADR-038).
 
 ## Operaciones confiables y hardening — 2.3a
 
@@ -444,4 +454,4 @@ También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/
 
 [GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL/Keycloak temporales con contraseñas aleatorias y los detiene al terminar. No depende de servicios locales ni secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
 
-Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Fases 0/1 cerradas por el usuario; estado y siguientes incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **2.1/2.2 aprobados; 2.3a pendiente de revisión. No avanzar a 2.3b ni RBAC.**
+Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Fases 0/1 cerradas por el usuario; estado y siguientes incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **2.1/2.2 aprobados; 2.3a aprobado con condiciones y 2.3a.1 pendiente de revisión. No avanzar a 2.3b ni RBAC.**

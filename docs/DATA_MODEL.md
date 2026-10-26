@@ -105,6 +105,12 @@ Audit_event conserva los campos históricos y agrega actor_type, actor_identity_
 
 Huella determinista y retorno original, incluidos timestamps; omisión/null/valor diferenciados y comparación adicional de contexto. READ COMMITTED y ON CONFLICT/relectura, lock tenant antes del FK y registro/datos/eventos/proyección atómicos. Retención durable: no reciclar request UUID ni borrar resultados sin política de archivo revisada; payload privado solo operador/backups. Memberships no cambia su modelo/historial/semántica; comparte solo el tipo mínimo de operación. Operación de actualización y límites: ADR-037/OPERATIONS_RUNBOOK.md. No se crean entidades RBAC.
 
+## Corrección de operaciones — 2.3a.1
+
+OperationTriggerHardening1793030400000, décima migración aditiva, agrega fingerprint_version smallint NOT NULL con CHECK 1/2: existentes=1, nuevas=2. No reescribe fingerprint/resultados/fechas ni eventos. V1 conserva su algoritmo histórico de primer nivel; v2 ordena objetos recursivamente mediante representación tipada, preserva arrays y distingue omisión/null/valor. El replay selecciona algoritmo por versión persistida, incluido Company v1 con taxFingerprint anidado. Nuevos escritores declaran v2; actualización coordinada sin mezclar código antiguo con DEFAULT 2.
+
+Los triggers de escritura/auditoría validan GUC canónico antes de conversión UUID y comparan la PK UUID sin cast sobre request_id, preservando acceso a operation_pkey. UPDATE de operación exige coincidencia de OLD/NEW request_id y procedencia con contexto LOCAL; completadas siguen inmutables. audit_event.actor_type pierde su DEFAULT histórico y una constraint exige technical_source no vacío para eventos verificados; LEGACY_UNVERIFIED preexistentes se conserva. RLS, FK, grants y semántica Memberships no cambian. ADR-038/runbook documentan pruebas y restricciones de rollback.
+
 ## Authorization — posterior
 
 - Permission: código estable namespaceado, p.ej. sales.orders.read; proviene de módulo.

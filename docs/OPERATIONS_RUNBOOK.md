@@ -2,6 +2,62 @@
 
 Solo desarrollo local controlado; no es un despliegue productivo ni un instalador general. 2.2 aprobado en 9175804; 2.3a pendiente de revisión. Sin RBAC ni administración empresarial HTTP.
 
+## Corrección 2.3a.1 — contrato vigente
+
+2.3a aprobado con condiciones en 685a29c; esta corrección queda pendiente de revisión. ADR-038 agrega la décima migración OperationTriggerHardening1793030400000, sin editar las nueve anteriores. No hay variables/dependencias nuevas ni RBAC. Los apartados de 2.3a debajo conservan su descripción histórica, actualizada por este addendum.
+
+Detener API/BFF y **todos los escritores operativos** antes de actualizar. Ejecutar la secuencia de actualización del apartado siguiente, que ahora aplica diez migraciones; reiniciar pools tras provisionar. No mezclar código escritor antiguo y esquema nuevo: las filas previas son fingerprint_version=1 y el nuevo default/escritor es 2. El servicio nuevo reproduce v1 y v2 según la versión almacenada, sin recalcular historial. Revert solo para el ciclo de bases descartables; no degradar código/esquema sobre registros v2 persistentes.
+
+### Triggers y procedencia
+
+Los dos triggers de escritura/auditoría leen el GUC, rechazan ausencia o formato no canónico mediante IF y solo después convierten a variable UUID. La búsqueda `request_id=operation_uuid` utiliza la PK UUID, sin convertir la columna a texto. No depender del orden de evaluación de AND/OR para evitar 22P02. El rechazo seguro es 42501. Se mantienen estado pendiente, rol y actor/motivo/tipo. Completar una operación mediante UPDATE exige que OLD/NEW request_id coincidan con el contexto LOCAL; otra operación pendiente no puede completarse accidentalmente.
+
+actor_type ya no tiene DEFAULT histórico para INSERT nuevos. Eventos verificados requieren technical_source no nulo ni vacío; filas LEGACY_UNVERIFIED existentes se conservan sin reatribución. El operador no puede insertar eventos directamente. Auditoría operativa necesita consultar tanto `organizations.operation` como `organizations.audit_event`, ligados por operation_request_id: varias filas por alta, ninguna transición adicional para un no-op y ningún evento nuevo para replay. No asumir UNIQUE(request_id) en auditoría ni usar un replay como lectura actual.
+
+### Huellas y compatibilidad
+
+V1 permanece exactamente como se generó en 2.3a: envelope JSON con version/type/args, orden de claves solo del primer nivel de args y orden histórico de objetos anidados. La nueva columna asigna 1 a registros existentes; no modifica sus hashes, resultados o timestamps. Las pruebas crean operaciones Tenant/Company en esquema v9, aplican v10 y reintentan con el servicio nuevo, comprobando resultado/huella/eventos originales.
+
+V2 ordena recursivamente claves mediante comparación de código, conserva orden de arrays y codifica nodos con etiquetas de tipo. Ausencia de propiedad, propiedad undefined, null y valores ordinarios no colisionan con marcadores del serializador. Formato admitido: objetos planos (también prototipo null), arrays densos sin propiedades extra, strings, booleanos, undefined, null y números finitos, incluido -0 distinguido. No admite getters/setters, ciclos, Date/Map/Set/BigInt/funciones/symbol ni propiedades ocultas. No ejecuta getters o toJSON. UUID y nombres se normalizan antes, en OrganizationsService. No se agrega una librería de canonicalización. La versión forma parte de la huella y del registro; versiones desconocidas no se reinterpretan.
+
+### Política de locks y reintentos
+
+| Rol                           | lock_timeout vigente         | Otros límites                              |
+| ----------------------------- | ---------------------------- | ------------------------------------------ |
+| API / Portal / Control Center | 1 s                          | 5/10/30 s sin cambios                      |
+| Organizations / Memberships   | 1 s                          | 20/30/120 s sin cambios                    |
+| Migrador                      | 3 s                          | statement/idle/transaction no se modifican |
+| Bootstrap                     | Independiente, no modificado | Sin cambios                                |
+
+SHOW/current_setting en conexiones nuevas confirma los valores. lock_timeout acota **cada espera** de adquisición de lock, mientras statement_timeout acota la sentencia, idle limita inactividad y transaction limita duración total. No limita la duración de DDL después de adquirir el lock ni sustituye mantenimiento. No elevar globalmente límites de API para ejecutar migraciones.
+
+**Encolamiento DDL:** una petición ACCESS EXCLUSIVE pendiente puede encolar lecturas posteriores aunque otra transacción siga leyendo. El timeout del migrador limita la espera, pero durante esa ventana los consumidores pueden alcanzar su propio límite de 1 s. Aplicar migraciones en una ventana, sin tráfico/escritores concurrentes y con transacciones cortas. Para cambios largos, planificar duración/locks/backup antes, no añadir reintentos ciegos que mantengan la cola.
+
+Ante 55P03 del migrador: detener el intento, verificar rollback de la transacción y que no quedó una sesión esperando locks; revisar pg_stat_activity/pg_locks con actor autorizado sin registrar SQL/parámetros sensibles. Resolver o esperar el fin legítimo del bloqueador, sin terminar sesiones ajenas automáticamente. En mantenimiento, ejecutar `pnpm db:show`, confirmar qué migraciones siguen pendientes y repetir `pnpm db:run` con los mismos archivos/credenciales. Verificar nuevamente show/diagnose y esquema. No editar historia ni marcar la migración como aplicada manualmente. La prueba usa una migración técnica exclusiva de fixture: falla con 55P03, no deja tabla/columna/history parcial y se ejecuta/revierte después de liberar el bloqueo.
+
+Una operación estructural cancelada por lock revierte registro/datos/eventos. Al cesar contención, reintentar **el mismo requestId y contexto**; el pool debe haber terminado rollback o descartado una conexión fallida antes de reutilizarla. No consultar la transacción abortada para decidir si existe el resultado. Los tests verifican contexto identity/tenant vacío después de 55P03 y reutilización de la misma conexión para el rol API.
+
+### Reproducir la evidencia del índice
+
+```powershell
+docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
+pnpm --filter @innoview/api test
+docker compose -f compose.test.yaml down
+```
+
+El test crea su propio DB_NAME `innoview_test_<UUID>` con roles independientes. Carga 20.000 registros técnicos SYSTEM completos dentro de una fixture, usando rol Organizations y triggers activos, sin empresas/usuarios reales. Ejecuta ANALYZE como migrador y EXPLAIN(FORMAT JSON) como operador, bajo RLS. Entorno: PostgreSQL 18.6-bookworm, Node 24.22.1; ejecución local Windows/Docker Desktop y misma suite en CI Ubuntu. No ejecutar esta carga sobre DB_NAME habitual ni copiar el SQL de fixture a producción.
+
+Plan local observado, para las búsquedas equivalentes a ambos triggers:
+
+| Predicado                     | Ruta observada                                             |
+| ----------------------------- | ---------------------------------------------------------- |
+| `o.request_id::text=$1::text` | Seq Scan de operation                                      |
+| `o.request_id=$1::uuid`       | Index Scan, operation_pkey, Index Cond por request_id UUID |
+
+Se admiten Index Scan/Index Only Scan/Bitmap Index Scan. La aceptación no usa tiempos de reloj ni fuerza parámetros del optimizador. Además del plan, la suite inspecciona pg_proc para comprobar el UUID local/predicado en **ambas funciones** y el orden validación/conversión. La carga añade pocos segundos al caso local y permanece en la suite normal de CI; no requiere comando de benchmark sobre datos persistentes. Los JSON de plan se emiten como evidencia técnica, sin secretos.
+
+Riesgos abiertos: alcance amplio del operador Organizations (revisión en 2.5), reasonCode detallado pendiente, lectura conjunta de registro/eventos, dependencia de representación SQL de políticas, GUC alterables y advertencia conocida TypeORM/pg. Ninguno se declara resuelto por esta corrección.
+
 ## Actualizar una base existente
 
 Conservar `.env`, sesiones y volúmenes. Detener los servidores antes de actualizar código y contratos de escritura. No hay variables, credenciales o dependencias nuevas.

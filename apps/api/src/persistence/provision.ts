@@ -89,11 +89,13 @@ export async function provisionDatabase(
       for (const [setting, value] of Object.entries(
         operational
           ? {
+              lock_timeout: '1s',
               statement_timeout: '20s',
               idle_in_transaction_session_timeout: '30s',
               transaction_timeout: '120s',
             }
           : {
+              lock_timeout: '1s',
               statement_timeout: '5s',
               idle_in_transaction_session_timeout: '10s',
               transaction_timeout: '30s',
@@ -103,6 +105,9 @@ export async function provisionDatabase(
           `ALTER ROLE ${q(role.user)} IN DATABASE ${q(bootstrap.database)} SET ${setting} TO ${pg.escapeLiteral(value)}`,
         );
     }
+    await client.query(
+      `ALTER ROLE ${q(migrator.user)} IN DATABASE ${q(bootstrap.database)} SET lock_timeout TO '3s'`,
+    );
     const owned = await client.query(
       'SELECT 1 FROM pg_class WHERE relowner IN (SELECT oid FROM pg_roles WHERE rolname=ANY($1)) UNION ALL SELECT 1 FROM pg_namespace WHERE nspowner IN (SELECT oid FROM pg_roles WHERE rolname=ANY($1)) UNION ALL SELECT 1 FROM pg_database WHERE datdba IN (SELECT oid FROM pg_roles WHERE rolname=ANY($1))',
       [runtime.map((c) => c.user)],
