@@ -1,3 +1,4 @@
+import { organizationOperation } from '../operations/fixtures.spec.js';
 import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -54,15 +55,24 @@ export async function verifyMemberships(
     const organizations = new OrganizationsService(organizationOperator);
     const identities = new IdentityService(app);
     const tenantA = (
-      await organizations.createTenant('Membership fixture A', 'Group A')
+      await organizations.createTenant(
+        'Membership fixture A',
+        'Group A',
+        organizationOperation(),
+      )
     ).tenant.id;
     const tenantB = (
-      await organizations.createTenant('Membership fixture B', 'Group B')
+      await organizations.createTenant(
+        'Membership fixture B',
+        'Group B',
+        organizationOperation(),
+      )
     ).tenant.id;
     const tenantC = (
       await organizations.createTenant(
         'Membership bootstrap fixture',
         'Group C',
+        organizationOperation(),
       )
     ).tenant.id;
     const principalA = {
@@ -488,6 +498,7 @@ export async function verifyMemberships(
           await organizations.createTenant(
             'Bootstrap race fixture',
             'Race group',
+            organizationOperation(),
           )
         ).tenant.id;
         const outcomes = await Promise.allSettled([

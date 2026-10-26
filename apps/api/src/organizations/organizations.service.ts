@@ -1,4 +1,10 @@
-import { randomUUID } from 'node:crypto';
+import { createHash } from 'node:crypto';
+import type { OrganizationOperation } from '../operations/trusted-operation.js';
+import {
+  canonicalUuid,
+  securityEvent,
+  databaseFailure,
+} from '../security/security-events.js';
 import { hostname, userInfo } from 'node:os';
 import { Inject, Injectable } from '@nestjs/common';
 import { DataSource, EntityManager } from 'typeorm';
@@ -22,6 +28,14 @@ export class OrganizationOperationError extends Error {
   }
 }
 
+export class OrganizationOperationConflictError extends OrganizationOperationError {
+  readonly code = 'REQUEST_ID_CONFLICT';
+  constructor() {
+    super();
+    this.message = 'Organization operation rejected: REQUEST_ID_CONFLICT';
+  }
+}
+
 @Injectable()
 export class OrganizationsService {
   constructor(@Inject(DataSource) private readonly source: DataSource) {}
@@ -30,8 +44,10 @@ export class OrganizationsService {
     if (
       manager.connection !== this.source ||
       !manager.queryRunner?.isTransactionActive
-    )
+    ) {
+      securityEvent('SECURITY_CONTEXT_MISSING');
       throw new Error('Active local transaction required');
+    }
     if (!tenantIds.length) return [];
     const rows = await manager.query<
       { id: string; name: string; group_id: string; group_name: string }[]
@@ -51,22 +67,142 @@ export class OrganizationsService {
       throw new OrganizationOperationError();
     return value.trim();
   }
+  private uuid(value: string): string {
+    if (typeof value !== 'string' || !canonicalUuid(value.toLowerCase()))
+      throw new OrganizationOperationError();
+    return value.toLowerCase();
+  }
   private async write<T>(
+    type: string,
+    tenantId: string | null,
+    args: Record<string, unknown>,
+    context: OrganizationOperation,
     operation: (manager: EntityManager) => Promise<T>,
   ): Promise<T> {
+    let replay = false;
     try {
-      return await this.source.transaction(async (manager) => {
-        const [role] = await manager.query<{ trusted: boolean }[]>(
-          "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':organizations' AS trusted FROM pg_roles WHERE rolname=current_user",
-        );
-        if (!role?.trusted) throw new OrganizationOperationError();
-        await manager.query(
-          "SELECT set_config('innoview.organization_actor',$1,true),set_config('innoview.organization_request',$2,true)",
-          [`${hostname()}:${userInfo().username}`, randomUUID()],
-        );
-        return operation(manager);
+      if (
+        !context ||
+        !['INNOVIEW_OPERATOR', 'SYSTEM'].includes(context.actorType) ||
+        context.userIdentityId !== undefined ||
+        typeof context.actor !== 'string' ||
+        typeof context.reason !== 'string' ||
+        !context.actor.trim() ||
+        !context.reason.trim() ||
+        context.actor.length > 200 ||
+        context.reason.length > 500 ||
+        /\p{Cc}/u.test(context.actor + context.reason)
+      )
+        throw new OrganizationOperationError();
+      const requestId = this.uuid(context.requestId);
+      const actor = context.actor.trim(),
+        reason = context.reason.trim();
+      // Versioned, flat arguments with stable key order; omission is explicitly tagged.
+      const canonical = JSON.stringify({
+        version: 1,
+        type,
+        args: Object.fromEntries(
+          Object.entries(args).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)),
+        ),
       });
-    } catch {
+      const fingerprint = createHash('sha256').update(canonical).digest('hex');
+      const result = await this.source.transaction(
+        'READ COMMITTED',
+        async (manager) => {
+          const [role] = await manager.query<{ trusted: boolean }[]>(
+            "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':organizations' AS trusted FROM pg_roles WHERE rolname=current_user",
+          );
+          if (!role?.trusted) throw new OrganizationOperationError();
+          await manager.query(
+            "SELECT set_config('innoview.organization_actor',$1,true),set_config('innoview.organization_request',$2,true),set_config('innoview.organization_reason',$3,true),set_config('innoview.organization_actor_type',$4,true)",
+            [actor, requestId, reason, context.actorType],
+          );
+          // Lock the tenant before the operation's FK takes KEY SHARE: upgrading
+          // several concurrent FK locks to FOR UPDATE would otherwise deadlock.
+          if (tenantId)
+            await manager.query(
+              'SELECT id FROM organizations.tenant WHERE id=$1 FOR UPDATE',
+              [tenantId],
+            );
+          const inserted = await manager.query<{ request_id: string }[]>(
+            `INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source)
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(request_id) DO NOTHING RETURNING request_id`,
+            [
+              requestId,
+              tenantId,
+              type,
+              fingerprint,
+              actor,
+              context.actorType,
+              reason,
+              `${hostname()}:${userInfo().username}`,
+            ],
+          );
+          if (!inserted.length) {
+            // A fresh READ COMMITTED statement sees the concurrently committed row.
+            const [existing] = await manager.query<
+              {
+                fingerprint: string;
+                actor: string;
+                actor_type: string;
+                reason: string;
+                result: T;
+                completed_at: Date | null;
+              }[]
+            >(
+              'SELECT fingerprint,actor,actor_type,reason,result,completed_at FROM organizations.operation WHERE request_id=$1',
+              [requestId],
+            );
+            if (
+              !existing ||
+              existing.fingerprint !== fingerprint ||
+              existing.actor !== actor ||
+              existing.actor_type !== context.actorType ||
+              existing.reason !== reason
+            )
+              throw new OrganizationOperationConflictError();
+            if (!existing.completed_at || existing.result === null)
+              throw new OrganizationOperationError();
+            replay = true;
+            return existing.result;
+          }
+          const value = await operation(manager);
+          const payload = JSON.stringify(value);
+          const affected =
+            type === 'CREATE_TENANT'
+              ? (value as { tenant: { id: string } }).tenant.id
+              : tenantId;
+          const [stored] = await manager.query<[{ result: T }[], number]>(
+            'UPDATE organizations.operation SET tenant_id=$2,result=$3::jsonb,completed_at=clock_timestamp() WHERE request_id=$1 RETURNING result',
+            [requestId, affected, payload],
+          );
+          return stored[0].result;
+        },
+      );
+      // Both first execution and replay return the same detached representation.
+      const restored = JSON.parse(
+        JSON.stringify(result),
+        (key: string, value: unknown) =>
+          ['createdAt', 'updatedAt'].includes(key) && typeof value === 'string'
+            ? new Date(value)
+            : value,
+      ) as T;
+      if (replay)
+        securityEvent(
+          'TRUSTED_OPERATION_REPLAY',
+          context.requestId.toLowerCase(),
+        );
+      return restored;
+    } catch (error) {
+      securityEvent(
+        error instanceof OrganizationOperationConflictError
+          ? 'TRUSTED_OPERATION_CONFLICT'
+          : 'TRUSTED_OPERATION_REJECTED',
+        context?.requestId,
+      );
+      if (error instanceof OrganizationOperationConflictError) throw error;
+      if (!(error instanceof OrganizationOperationError))
+        securityEvent(databaseFailure(error), context?.requestId);
       throw new OrganizationOperationError();
     }
   }
@@ -96,114 +232,174 @@ export class OrganizationsService {
     );
   }
 
-  async createTenant(name: string, groupName: string) {
-    return this.write(async (manager) => {
-      const tenant = await manager.save(
-        Tenant,
-        manager.create(Tenant, { name: this.name(name), status: 'ACTIVE' }),
-      );
-      const unit = await this.unit(manager, tenant.id, 'GROUP', groupName);
-      const group = await manager.save(
-        BusinessGroup,
-        manager.create(BusinessGroup, { tenantId: tenant.id, id: unit.id }),
-      );
-      return { tenant, group, unit };
-    });
+  async createTenant(
+    name: string,
+    groupName: string,
+    operation: OrganizationOperation,
+  ) {
+    name = this.name(name);
+    groupName = this.name(groupName);
+    return this.write(
+      'CREATE_TENANT',
+      null,
+      { name, groupName },
+      operation,
+      async (manager) => {
+        const tenant = await manager.save(
+          Tenant,
+          manager.create(Tenant, { name: this.name(name), status: 'ACTIVE' }),
+        );
+        const unit = await this.unit(manager, tenant.id, 'GROUP', groupName);
+        const group = await manager.save(
+          BusinessGroup,
+          manager.create(BusinessGroup, { tenantId: tenant.id, id: unit.id }),
+        );
+        return { tenant, group, unit };
+      },
+    );
   }
 
   async createCompany(
     tenantId: string,
     businessGroupId: string,
     name: string,
-    taxId: string | null = null,
+    taxId: string | null | undefined,
+    operation: OrganizationOperation,
   ) {
-    return this.write(async (manager) => {
-      await this.lock(manager, tenantId);
-      const parent = await manager.findOneBy(OrganizationalUnit, {
-        tenantId,
-        id: businessGroupId,
-        type: 'GROUP',
-        status: 'ACTIVE',
-      });
-      if (
-        !parent ||
-        (taxId !== null &&
-          (typeof taxId !== 'string' || !taxId.trim() || taxId.length > 80))
-      )
-        throw new OrganizationOperationError();
-      const unit = await this.unit(manager, tenantId, 'COMPANY', name);
-      const company = await manager.save(
-        Company,
-        manager.create(Company, {
+    tenantId = this.uuid(tenantId);
+    businessGroupId = this.uuid(businessGroupId);
+    name = this.name(name);
+    if (
+      taxId !== undefined &&
+      taxId !== null &&
+      (typeof taxId !== 'string' || !taxId.trim() || taxId.length > 80)
+    )
+      throw new OrganizationOperationError();
+    const taxFingerprint =
+      taxId === undefined
+        ? { kind: 'omitted' }
+        : taxId === null
+          ? { kind: 'null' }
+          : { kind: 'value', value: taxId };
+    return this.write(
+      'CREATE_COMPANY',
+      tenantId,
+      { tenantId, businessGroupId, name, taxId: taxFingerprint },
+      operation,
+      async (manager) => {
+        await this.lock(manager, tenantId);
+        const parent = await manager.findOneBy(OrganizationalUnit, {
           tenantId,
-          id: unit.id,
-          businessGroupId,
-          taxId,
-        }),
-      );
-      return { company, unit };
-    });
+          id: businessGroupId,
+          type: 'GROUP',
+          status: 'ACTIVE',
+        });
+        if (
+          !parent ||
+          (taxId !== null &&
+            taxId !== undefined &&
+            (typeof taxId !== 'string' || !taxId.trim() || taxId.length > 80))
+        )
+          throw new OrganizationOperationError();
+        const unit = await this.unit(manager, tenantId, 'COMPANY', name);
+        const company = await manager.save(
+          Company,
+          manager.create(Company, {
+            tenantId,
+            id: unit.id,
+            businessGroupId,
+            taxId: taxId ?? null,
+          }),
+        );
+        return { company, unit };
+      },
+    );
   }
 
-  async createBranch(tenantId: string, companyId: string, name: string) {
-    return this.write(async (manager) => {
-      await this.lock(manager, tenantId);
-      const parent = await manager.findOneBy(OrganizationalUnit, {
-        tenantId,
-        id: companyId,
-        type: 'COMPANY',
-        status: 'ACTIVE',
-      });
-      if (!parent) throw new OrganizationOperationError();
-      const unit = await this.unit(manager, tenantId, 'BRANCH', name);
-      const branch = await manager.save(
-        Branch,
-        manager.create(Branch, { tenantId, id: unit.id, companyId }),
-      );
-      return { branch, unit };
-    });
+  async createBranch(
+    tenantId: string,
+    companyId: string,
+    name: string,
+    operation: OrganizationOperation,
+  ) {
+    tenantId = this.uuid(tenantId);
+    companyId = this.uuid(companyId);
+    name = this.name(name);
+    return this.write(
+      'CREATE_BRANCH',
+      tenantId,
+      { tenantId, companyId, name },
+      operation,
+      async (manager) => {
+        await this.lock(manager, tenantId);
+        const parent = await manager.findOneBy(OrganizationalUnit, {
+          tenantId,
+          id: companyId,
+          type: 'COMPANY',
+          status: 'ACTIVE',
+        });
+        if (!parent) throw new OrganizationOperationError();
+        const unit = await this.unit(manager, tenantId, 'BRANCH', name);
+        const branch = await manager.save(
+          Branch,
+          manager.create(Branch, { tenantId, id: unit.id, companyId }),
+        );
+        return { branch, unit };
+      },
+    );
   }
 
   async setStatus(
     tenantId: string,
     unitId: string | null,
     status: OrganizationStatus,
+    operation: OrganizationOperation,
   ) {
+    tenantId = this.uuid(tenantId);
+    unitId = unitId === null ? null : this.uuid(unitId);
     if (!['ACTIVE', 'INACTIVE', 'ARCHIVED'].includes(status))
       throw new OrganizationOperationError();
-    return this.write(async (manager) => {
-      const tenant = await this.lock(manager, tenantId, false);
-      if (unitId === null) {
-        if (tenant.status !== status)
-          await manager.update(Tenant, { id: tenantId }, { status });
-        return manager.findOneByOrFail(Tenant, { id: tenantId });
-      }
-      const unit = await manager.findOneByOrFail(OrganizationalUnit, {
-        tenantId,
-        id: unitId,
-      });
-      if (unit.status !== status)
-        await manager.update(
-          OrganizationalUnit,
-          { tenantId, id: unitId },
-          { status },
-        );
-      return manager.findOneByOrFail(OrganizationalUnit, {
-        tenantId,
-        id: unitId,
-      });
-    });
+    return this.write(
+      'SET_STATUS',
+      tenantId,
+      { tenantId, unitId, status },
+      operation,
+      async (manager) => {
+        const tenant = await this.lock(manager, tenantId, false);
+        if (unitId === null) {
+          if (tenant.status !== status)
+            await manager.update(Tenant, { id: tenantId }, { status });
+          return manager.findOneByOrFail(Tenant, { id: tenantId });
+        }
+        const unit = await manager.findOneByOrFail(OrganizationalUnit, {
+          tenantId,
+          id: unitId,
+        });
+        if (unit.status !== status)
+          await manager.update(
+            OrganizationalUnit,
+            { tenantId, id: unitId },
+            { status },
+          );
+        return manager.findOneByOrFail(OrganizationalUnit, {
+          tenantId,
+          id: unitId,
+        });
+      },
+    );
   }
 
   // Internal read contract. API consumers must supply the validated tenant scope;
   // membership and RLS do not replace future business permission checks.
-  async getStructure(tenantId: string, manager?: EntityManager) {
+  async getStructure(tenantId: string, manager: EntityManager) {
     if (
-      manager &&
-      (manager.connection !== this.source ||
-        !manager.queryRunner?.isTransactionActive)
-    )
+      !manager ||
+      manager.connection !== this.source ||
+      !manager.queryRunner?.isTransactionActive
+    ) {
+      securityEvent('SECURITY_CONTEXT_MISSING');
       throw new Error('Active local transaction required');
+    }
     const read = async (manager: EntityManager) => {
       const tenant = await manager.findOneByOrFail(Tenant, { id: tenantId });
       const group = await manager.findOneByOrFail(BusinessGroup, { tenantId });
@@ -225,8 +421,18 @@ export class OrganizationsService {
         })),
       };
     };
-    return manager
-      ? read(manager)
-      : this.source.transaction('REPEATABLE READ', read);
+    const [scope] = await manager.query<
+      { trusted: boolean; identity: string | null; tenant: string | null }[]
+    >(
+      "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':organizations' AS trusted,NULLIF(current_setting('innoview.user_identity_id',true),'') AS identity,NULLIF(current_setting('innoview.tenant_id',true),'') AS tenant FROM pg_roles WHERE rolname=current_user",
+    );
+    if (
+      !scope?.trusted &&
+      (!canonicalUuid(scope?.identity) || scope.tenant !== tenantId)
+    ) {
+      securityEvent('SECURITY_CONTEXT_MISSING');
+      throw new Error('Validated tenant transaction required');
+    }
+    return read(manager);
   }
 }

@@ -1,3 +1,4 @@
+import { verifyHardening } from './hardening.spec.js';
 import { readdirSync } from 'node:fs';
 import { OrganizationsService } from '../organizations/organizations.service.js';
 import { initializeOrganizationsOperatorDataSource } from './data-sources.js';
@@ -164,7 +165,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
             .filter(
               (name) =>
                 name.endsWith('.js') &&
-                !name.includes('OrganizationsTenantRls'),
+                !name.includes('OrganizationsTenantRls') &&
+                !name.includes('OrganizationOperations'),
             )
             .map((name) =>
               fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
@@ -180,24 +182,75 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
         const operator = await initializeOrganizationsOperatorDataSource(env);
         try {
           const service = new OrganizationsService(operator);
-          const existing = await service.createTenant(
-            'Pre-upgrade tenant',
-            'Pre-upgrade group',
-          );
-          const company = await service.createCompany(
-            existing.tenant.id,
-            existing.group.id,
-            'Pre-upgrade company',
-            'SYNTHETIC',
-          );
-          await service.createBranch(
-            existing.tenant.id,
-            company.company.id,
-            'Pre-upgrade branch',
-          );
+          // Historical fixture before 2.2/2.3a: explicit SQL against the then-current schema.
+          const tid = randomUUID(),
+            gid = randomUUID(),
+            cid = randomUUID(),
+            bid = randomUUID();
+          await operator.transaction(async (manager) => {
+            await manager.query(
+              "INSERT INTO organizations.tenant(id,name) VALUES($1,'Pre-upgrade tenant')",
+              [tid],
+            );
+            for (const [id, type, name] of [
+              [gid, 'GROUP', 'Pre-upgrade group'],
+              [cid, 'COMPANY', 'Pre-upgrade company'],
+              [bid, 'BRANCH', 'Pre-upgrade branch'],
+            ])
+              await manager.query(
+                'INSERT INTO organizations.organizational_unit(id,tenant_id,type,name) VALUES($1,$2,$3,$4)',
+                [id, tid, type, name],
+              );
+            await manager.query(
+              'INSERT INTO organizations.business_group(tenant_id,id) VALUES($1,$2)',
+              [tid, gid],
+            );
+            await manager.query(
+              'INSERT INTO organizations.company(tenant_id,id,business_group_id) VALUES($1,$2,$3)',
+              [tid, cid, gid],
+            );
+            await manager.query(
+              'INSERT INTO organizations.branch(tenant_id,id,company_id) VALUES($1,$2,$3)',
+              [tid, bid, cid],
+            );
+          });
+          const existing = { tenant: { id: tid } };
+          const eight = createDataSource('migrator', env);
+          eight.setOptions({
+            migrations: readdirSync(folder)
+              .filter(
+                (name) =>
+                  name.endsWith('.js') &&
+                  !name.includes('OrganizationOperations'),
+              )
+              .map((name) =>
+                fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
+              ),
+          });
+          await eight.initialize();
+          try {
+            assert.equal((await eight.runMigrations()).length, 1);
+          } finally {
+            await eight.destroy();
+          }
+          const legacyRequest = randomUUID();
+          await operator.transaction(async (manager) => {
+            await manager.query(
+              "SELECT set_config('innoview.organization_actor','legacy:host-only',true),set_config('innoview.organization_request',$1,true)",
+              [legacyRequest],
+            );
+            await manager.query(
+              "UPDATE organizations.tenant SET status='INACTIVE' WHERE id=$1",
+              [tid],
+            );
+          });
           assert.equal((await migrator.runMigrations()).length, 1);
           assert.equal(
-            (await service.getStructure(existing.tenant.id)).branches.length,
+            (
+              await operator.transaction((manager) =>
+                service.getStructure(existing.tenant.id, manager),
+              )
+            ).branches.length,
             1,
           );
           const [directory] = await operator.query<
@@ -208,14 +261,22 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
           );
           assert.deepEqual(directory, {
             tenant_name: 'Pre-upgrade tenant',
-            available: true,
+            available: false,
           });
           assert.deepEqual(
             await operator.query(
-              'SELECT id FROM organizations.audit_event WHERE tenant_id=$1',
+              'SELECT actor,actor_type,reason,actor_identity_id,operation_request_id FROM organizations.audit_event WHERE tenant_id=$1',
               [existing.tenant.id],
             ),
-            [],
+            [
+              {
+                actor: 'legacy:host-only',
+                actor_type: 'LEGACY_UNVERIFIED',
+                reason: null,
+                actor_identity_id: null,
+                operation_request_id: null,
+              },
+            ],
           );
         } finally {
           await operator.destroy();
@@ -226,7 +287,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               'SELECT count(*)::int AS n FROM platform_meta.migrations',
             )
           )[0].n,
-          8,
+          9,
         );
         assert.equal(await migrator.showMigrations(), false);
         const [owner] = await migrator.query<{ owner: string }[]>(
@@ -523,11 +584,25 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await verifyContextPersistence(t, app, env);
     await verifyMembershipRls(t, app, migrator, env);
     await verifyOrganizationsRls(t, app, migrator, env);
+    await verifyHardening(t, app, migrator, env);
 
     await t.test(
       'real migration reverts and reapplies only in this disposable database',
       async () => {
         assert.match(database, /^innoview_test_[a-f0-9]{32}$/);
+        const revertOperations = spawnSync(
+          process.execPath,
+          [
+            fileURLToPath(new URL('./migration.cli.js', import.meta.url)),
+            'revert',
+          ],
+          {
+            env: { ...process.env, ...env, DB_DISPOSABLE: 'true' },
+            encoding: 'utf8',
+            windowsHide: true,
+          },
+        );
+        assert.equal(revertOperations.status, 0, revertOperations.stderr);
         const revertOrganizationsRls = spawnSync(
           process.execPath,
           [

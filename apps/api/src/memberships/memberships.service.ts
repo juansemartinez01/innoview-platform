@@ -1,13 +1,10 @@
+import type { TrustedOperation } from '../operations/trusted-operation.js';
 import { Inject, Injectable } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
 import { Membership } from './membership.entity.js';
 import { MembershipAuditEvent } from './audit-event.entity.js';
 
-export interface MembershipOperation {
-  actor: string;
-  reason: string;
-  requestId: string;
-}
+export type MembershipOperation = TrustedOperation;
 export class MembershipOperationError extends Error {
   constructor(readonly code: string) {
     super(`Membership operation rejected: ${code}`);

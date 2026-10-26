@@ -4,7 +4,7 @@ Fecha de selección: 2026-10-24. No se cambia el stack acordado.
 
 ## Estado de cierre — 2026-10-25
 
-Fases 0/1 cerradas; 2.1 aprobado en 55a1b29. 2.2 implementa contexto tenant/RLS Organizations y operador independiente (ADR-036), pendiente de revisión. Ocho migraciones. Sin RBAC. Este documento conserva evidencia histórica; operación actual en README.
+Fases 0/1 cerradas; 2.1 aprobado en 55a1b29. 2.2 aprobado en 9175804. 2.3a agrega operaciones/hardening (ADR-037), pendiente de revisión. Nueve migraciones. Sin RBAC. Este documento conserva evidencia histórica; operación actual en README.
 
 | Incremento                   | Estado y evidencia                                                                         |
 | ---------------------------- | ------------------------------------------------------------------------------------------ |

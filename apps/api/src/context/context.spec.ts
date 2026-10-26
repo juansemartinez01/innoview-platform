@@ -1,3 +1,4 @@
+import { organizationOperation } from '../operations/fixtures.spec.js';
 import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -46,10 +47,12 @@ export async function verifyContextPersistence(
     const a = await organizations.createTenant(
       'Snapshot context A',
       'Snapshot group A',
+      organizationOperation(),
     );
     const b = await organizations.createTenant(
       'Snapshot context B',
       'Snapshot group B',
+      organizationOperation(),
     );
     const operation = () => ({
       actor: 'fixture:snapshot',
@@ -72,7 +75,12 @@ export async function verifyContextPersistence(
             manager,
           );
           await trusted.revoke(a.tenant.id, identity.id, operation());
-          await organizations.setStatus(b.tenant.id, null, 'INACTIVE');
+          await organizations.setStatus(
+            b.tenant.id,
+            null,
+            'INACTIVE',
+            organizationOperation(),
+          );
           // A READ COMMITTED query here would mix the new organization state with
           // the old membership list. Both contracts must keep the supplied snapshot.
           assert.equal(

@@ -1,3 +1,4 @@
+import { organizationOperation } from '../operations/fixtures.spec.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { TestContext } from 'node:test';
@@ -78,17 +79,20 @@ export async function verifyOrganizationsRls(
       const record = await writes.createTenant(
         `RLS tenant ${suffix}`,
         `RLS group ${suffix}`,
+        organizationOperation(),
       );
       const company = await writes.createCompany(
         record.tenant.id,
         record.group.id,
         `Private company ${suffix}`,
         `PRIVATE-${suffix}`,
+        organizationOperation(),
       );
       await writes.createBranch(
         record.tenant.id,
         company.company.id,
         `Private branch ${suffix}`,
+        organizationOperation(),
       );
       tenants.push(record);
     }
@@ -128,7 +132,7 @@ export async function verifyOrganizationsRls(
         >(
           "SELECT relrowsecurity,relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='organizations' AND c.relkind='r'",
         );
-        assert.equal(catalog.length, 7);
+        assert.equal(catalog.length, 8);
         assert.ok(
           catalog.every((row) => row.relrowsecurity && row.relforcerowsecurity),
         );
@@ -404,7 +408,11 @@ export async function verifyOrganizationsRls(
           );
         }
         await assert.rejects(
-          new OrganizationsService(app).createTenant('Forbidden', 'Forbidden'),
+          new OrganizationsService(app).createTenant(
+            'Forbidden',
+            'Forbidden',
+            organizationOperation(),
+          ),
           OrganizationOperationError,
         );
         await assert.rejects(
@@ -430,7 +438,11 @@ export async function verifyOrganizationsRls(
           'SELECT count(*)::int AS n FROM organizations.audit_event',
         );
         await assert.rejects(
-          writes.createTenant('Atomic rollback', '   '),
+          writes.createTenant(
+            'Atomic rollback',
+            '   ',
+            organizationOperation(),
+          ),
           OrganizationOperationError,
         );
         assert.deepEqual(
@@ -504,18 +516,38 @@ export async function verifyOrganizationsRls(
     await t.test(
       'Organizations RLS: revocation, inactive/archived tenant and inactive group close subsequent scopes',
       async () => {
-        await writes.setStatus(a.tenant.id, null, 'INACTIVE');
+        await writes.setStatus(
+          a.tenant.id,
+          null,
+          'INACTIVE',
+          organizationOperation(),
+        );
         await assert.rejects(
           scope.read(principalA, a.tenant.id, () => undefined),
           /Context unavailable/,
         );
-        await writes.setStatus(a.tenant.id, null, 'ACTIVE');
-        await writes.setStatus(a.tenant.id, a.group.id, 'INACTIVE');
+        await writes.setStatus(
+          a.tenant.id,
+          null,
+          'ACTIVE',
+          organizationOperation(),
+        );
+        await writes.setStatus(
+          a.tenant.id,
+          a.group.id,
+          'INACTIVE',
+          organizationOperation(),
+        );
         await assert.rejects(
           scope.read(principalA, a.tenant.id, () => undefined),
           /Context unavailable/,
         );
-        await writes.setStatus(a.tenant.id, a.group.id, 'ACTIVE');
+        await writes.setStatus(
+          a.tenant.id,
+          a.group.id,
+          'ACTIVE',
+          organizationOperation(),
+        );
         await scope.read(principalA, a.tenant.id, async (manager) => {
           await membershipWrites.revoke(a.tenant.id, aIdentity.id, operation());
           await assertPrivate(manager, a.tenant.id); // already-started snapshot
@@ -524,7 +556,12 @@ export async function verifyOrganizationsRls(
           scope.read(principalA, a.tenant.id, () => undefined),
           /Context unavailable/,
         );
-        await writes.setStatus(b.tenant.id, null, 'ARCHIVED');
+        await writes.setStatus(
+          b.tenant.id,
+          null,
+          'ARCHIVED',
+          organizationOperation(),
+        );
         await assert.rejects(
           scope.read(principalA, b.tenant.id, () => undefined),
           /Context unavailable/,

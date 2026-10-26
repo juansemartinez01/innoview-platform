@@ -15,7 +15,8 @@
     "db:create": "pnpm build && node --env-file-if-exists=../../.env dist/persistence/migration.cli.js create",
     "db:generate": "pnpm build && node --env-file-if-exists=../../.env dist/persistence/migration.cli.js generate",
     "db:revert": "pnpm build && node --env-file-if-exists=../../.env dist/persistence/migration.cli.js revert",
-    "memberships:bootstrap": "pnpm build && node --env-file-if-exists=../../.env dist/memberships/bootstrap.cli.js"
+    "memberships:bootstrap": "pnpm build && node --env-file-if-exists=../../.env dist/memberships/bootstrap.cli.js",
+    "db:diagnose": "pnpm build && node --env-file-if-exists=../../.env dist/persistence/diagnostics.cli.js"
   },
   "dependencies": {
     "@nestjs/common": "12.2.0",

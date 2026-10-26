@@ -81,6 +81,28 @@ export async function provisionDatabase(
         `ALTER ROLE ${q(config.user)} IN DATABASE ${q(bootstrap.database)} SET search_path TO pg_catalog`,
       );
     }
+    // Defaults apply only to new connections; migrate separately from runtime.
+    for (const role of runtime) {
+      const operational = [membership.user, organizations.user].includes(
+        role.user,
+      );
+      for (const [setting, value] of Object.entries(
+        operational
+          ? {
+              statement_timeout: '20s',
+              idle_in_transaction_session_timeout: '30s',
+              transaction_timeout: '120s',
+            }
+          : {
+              statement_timeout: '5s',
+              idle_in_transaction_session_timeout: '10s',
+              transaction_timeout: '30s',
+            },
+      ))
+        await client.query(
+          `ALTER ROLE ${q(role.user)} IN DATABASE ${q(bootstrap.database)} SET ${setting} TO ${pg.escapeLiteral(value)}`,
+        );
+    }
     const owned = await client.query(
       'SELECT 1 FROM pg_class WHERE relowner IN (SELECT oid FROM pg_roles WHERE rolname=ANY($1)) UNION ALL SELECT 1 FROM pg_namespace WHERE nspowner IN (SELECT oid FROM pg_roles WHERE rolname=ANY($1)) UNION ALL SELECT 1 FROM pg_database WHERE datdba IN (SELECT oid FROM pg_roles WHERE rolname=ANY($1))',
       [runtime.map((c) => c.user)],
@@ -208,6 +230,7 @@ export async function provisionDatabase(
       'branch',
       'tenant_directory',
       'audit_event',
+      'operation',
     ]) {
       const found = await client.query<{ exists: boolean }>(
         'SELECT to_regclass($1) IS NOT NULL AS exists',
@@ -217,6 +240,10 @@ export async function provisionDatabase(
       await client.query(
         `GRANT SELECT, INSERT ON organizations.${q(table)} TO ${q(organizations.user)}`,
       );
+      if (table === 'operation')
+        await client.query(
+          `GRANT UPDATE(tenant_id,result,completed_at) ON organizations.operation TO ${q(organizations.user)}`,
+        );
       if (['tenant', 'organizational_unit'].includes(table))
         await client.query(
           `GRANT UPDATE(status,updated_at) ON organizations.${q(table)} TO ${q(organizations.user)}`,
@@ -228,7 +255,7 @@ export async function provisionDatabase(
         await client.query(
           `GRANT SELECT(tenant_id,tenant_name,group_id,group_name,available) ON organizations.tenant_directory TO ${q(app.user)}`,
         );
-      } else if (table !== 'audit_event')
+      } else if (!['audit_event', 'operation'].includes(table))
         await client.query(
           `GRANT SELECT ON organizations.${q(table)} TO ${q(app.user)}`,
         );

@@ -1,6 +1,33 @@
 # Innoview Platform
 
-Fases 0 y 1 oficialmente cerradas. 2.1 aprobado en 55a1b29. Incremento 2.2: contexto transaccional de tenant y RLS Organizations implementados, pendientes de revisión. Fuente de verdad: AGENTS.md y docs/. Sin RBAC, permisos empresariales ni administración pública de organizaciones/membresías. Las secciones de incrementos anteriores conservan su contexto histórico; ADR-036 y la sección siguiente describen los permisos vigentes.
+Fases 0 y 1 oficialmente cerradas; 2.1 y 2.2 aprobados hasta 9175804. Incremento **2.3a** implementado, pendiente de revisión: hardening transversal, auditoría e idempotencia. Sin RBAC, Authorization funcional ni endpoints administrativos. Las secciones anteriores conservan su contexto histórico; ADR-037 y el runbook describen los contratos actuales. No avanzar a 2.3b sin autorización.
+
+## Operaciones confiables y hardening — 2.3a
+
+No hay variables, credenciales ni dependencias nuevas. Detener aplicaciones para actualizar código/migración coordinadamente, conservar `.env`/volúmenes/sesiones y reiniciar pools tras aprovisionar:
+
+```powershell
+pnpm install --frozen-lockfile
+docker compose up -d --wait --wait-timeout 240
+pnpm db:provision
+pnpm db:run
+pnpm db:provision
+pnpm db:show
+pnpm db:diagnose
+pnpm dev
+```
+
+La novena migración OrganizationOperations1793023200000 crea el registro durable de operaciones con PK global request_id. Organizations requiere contexto explícito actor/reason/requestId y actorType técnico; el invocador conserva el UUID por operación lógica y lo reutiliza en reintentos. Mismos argumentos/contexto devuelven el resultado original; reutilización incompatible produce REQUEST_ID_CONFLICT. Registro, estructura, auditoría y directorio son atómicos. No hay unicidad ingenua sobre eventos ni limpieza automática del registro. Auditoría anterior mantiene sus datos y queda identificada como LEGACY_UNVERIFIED; USER_IDENTITY tiene FK preparada pero su uso está rechazado hasta existir administración autorizada. getStructure exige manager transaccional de la misma fuente, sin transacción interna opcional.
+
+Timeouts efectivos en conexiones nuevas: API/BFF **5s statement / 10s idle-in-transaction / 30s transaction**; operadores **20s / 30s / 120s**. Migrador/bootstrap conservan sus límites administrativos. No hacen revocación instantánea ni resisten SQL arbitrario. Detalle, pruebas y ajuste en [runbook](docs/OPERATIONS_RUNBOOK.md).
+
+`db:diagnose` ejecuta con rol Organizations validado y transacciones read-only: inventario de tablas/columnas/ACL/RLS/políticas/roles/defaults y comparación completa del directorio con su fuente. Sale 1 ante hallazgos o indisponibilidad; no modifica ni repara. No necesita bootstrap/migrador ni expone información por HTTP. Su proceso solo requiere DB_HOST/PORT/NAME/SSL y DB_ORGANIZATIONS_USER/PASSWORD; las herramientas locales pueden leer `.env`, mientras los launchers API/BFF siguen filtrando esas credenciales. Las excepciones no-RLS y la dependencia Memberships/directorio son explícitas y se prueban con drift inducido únicamente en fixtures.
+
+La API devuelve X-Correlation-Id UUID controlado y registra eventos de seguridad mínimos correlacionados; no registra JWT, cookies, secretos, SQL/argumentos o identidades completas. 42501, ausencia inesperada de contexto y conexión indisponible son categorías distintas. Un resultado vacío bajo RLS no se marca automáticamente como ataque. Las respuestas conservan mensajes seguros y no se agregan rutas.
+
+Validar con `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm test`, `pnpm build`; PostgreSQL/Keycloak descartables mediante compose.test.yaml y Chromium como en las instrucciones existentes. Resultado local: **111 resultados satisfactorios (66 PostgreSQL + 45 entorno/OIDC/runtime/Chromium)**. Diagnóstico local: 16 tablas inventariadas, sin hallazgos ni divergencias; nueve migraciones aplicadas y generate --check sin diferencias. Runbook completo, contrato de firmas, normalización/replay, retención y recuperación manual de emergencia: [OPERATIONS_RUNBOOK.md](docs/OPERATIONS_RUNBOOK.md); decisiones: ADR-037. Reparación soportada e instalación desde cero con comando documentado y comprobación CI son criterios programados para **2.5**, no capacidades completadas en 2.3a.
+
+RLS actual impone aislamiento tenant sobre las tablas privadas implementadas. Permisos entre empresas/sucursales del mismo tenant quedan para 2.4 y pruebas de 2.5; archivos/jobs futuros requieren controles propios. Siguen abiertos GUC alterables por SQL arbitrario, snapshots en curso, falta de Guards/caché de autorización, reparación soportada de directorio pendiente y advertencia conocida TypeORM/pg. No hay cambios en login, logout, refresh o selección de navegación.
 
 ## Contexto tenant y RLS Organizations — 2.2
 
@@ -39,7 +66,7 @@ Los launchers excluyen también DB_ORGANIZATIONS_* de API y BFF; dev/start, guar
 
 Validación: `docker compose -f compose.test.yaml up -d --wait --wait-timeout 180`, `pnpm test`, `pnpm lint`, `pnpm format:check`, `pnpm typecheck`, `pnpm build`; luego `docker compose -f compose.test.yaml down` sin `--volumes`. Resultado local 2.2: **99 resultados aprobados (55 PostgreSQL + 44 entorno/OIDC/runtime/Chromium), cero fallos**. Las pruebas agregan SQL sin filtros/joins, tres tenants y dos identidades más una vacía, límites de columnas, pool físico único, concurrencia, estados/revocación, auditoría/ACL y upgrade de datos existentes. Continúan Keycloak, Chromium y bootstrap. Solo se revierten bases generadas por las pruebas. `pnpm db:generate src/persistence/migrations/SchemaCheck --check` verifica que metadata y esquema coincidan, sin generar archivos.
 
-**Límites:** contexto y RLS no conceden permisos sobre compañías/sucursales. No hay RBAC ni Guards empresariales. Una transacción iniciada conserva su snapshot ante revocaciones; comprobaciones nuevas ven cambios confirmados. Un atacante con SQL arbitrario puede modificar GUC: no son credenciales y no sustituyen autenticación/consultas parametrizadas/autorización. No se cubren todavía jobs, archivos o cachés. [ADR-036](docs/DECISIONS.md) detalla políticas, actores y coordinación. No avanzar a 2.3 sin revisión.
+**Límites:** contexto y RLS no conceden permisos sobre compañías/sucursales. No hay RBAC ni Guards empresariales. Una transacción iniciada conserva su snapshot ante revocaciones; comprobaciones nuevas ven cambios confirmados. Un atacante con SQL arbitrario puede modificar GUC: no son credenciales y no sustituyen autenticación/consultas parametrizadas/autorización. No se cubren todavía jobs, archivos o cachés. [ADR-036](docs/DECISIONS.md) detalla políticas, actores y coordinación. 2.2 aprobado; 2.3a se revisa por separado (ADR-037).
 
 ## Requisitos
 
@@ -417,4 +444,4 @@ También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/
 
 [GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL/Keycloak temporales con contraseñas aleatorias y los detiene al terminar. No depende de servicios locales ni secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
 
-Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Fases 0/1 cerradas por el usuario; estado y siguientes incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **2.1 aprobado; 2.2 pendiente de revisión. No avanzar a 2.3 ni RBAC.**
+Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Fases 0/1 cerradas por el usuario; estado y siguientes incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **2.1/2.2 aprobados; 2.3a pendiente de revisión. No avanzar a 2.3b ni RBAC.**

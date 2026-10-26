@@ -1,3 +1,4 @@
+import { securityEvent } from '../security/security-events.js';
 import {
   CanActivate,
   Controller,
@@ -89,6 +90,7 @@ export class AuthenticationGuard implements CanActivate {
       request.identity = await this.verifier.verify(header.slice(7));
       return true;
     } catch {
+      securityEvent('AUTHENTICATION_REJECTED');
       throw new UnauthorizedException('Valid access token required');
     }
   }

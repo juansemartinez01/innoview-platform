@@ -1,3 +1,9 @@
+const organizationOperation = () => ({
+  actor: 'fixture:trusted-operator',
+  actorType: 'SYSTEM',
+  reason: 'Discardable integration fixture',
+  requestId: randomUUID(),
+});
 import assert from 'node:assert/strict';
 import { verifyContext } from './context.checks.mjs';
 import { test } from 'node:test';
@@ -469,17 +475,19 @@ await test(
       );
       const compiledOffset = logs.length;
       await launch('api', 'start');
+      const compiledRoles = await bootstrap.query(
+        'SELECT usename FROM pg_stat_activity WHERE datname=$1 AND usename=$2',
+        [database, env.DB_APP_USER],
+      );
       await launch('portal', 'dev', ['--port', '13000']);
       await launch('control-center', 'dev', ['--port', '13001']);
       await t.test(
         'normal compiled API and both BFF launchers preserve credential separation',
         async () => {
           assertRuntimeKeys(logs.slice(compiledOffset), 'API');
-          const actualRoles = await bootstrap.query(
-            'SELECT usename FROM pg_stat_activity WHERE datname=$1 AND usename=$2',
-            [database, env.DB_APP_USER],
-          );
-          assert.ok(actualRoles.rowCount > 0);
+          // Observe the validated startup connection before unrelated BFF builds
+          // can outlast pg's legitimate idle-pool timeout.
+          assert.ok(compiledRoles.rowCount > 0);
           const rights = await migrator.query(
             "SELECT has_table_privilege($1,'memberships.membership','INSERT') OR has_table_privilege($1,'memberships.membership','UPDATE') OR has_table_privilege($1,'memberships.membership','DELETE') AS writes",
             [env.DB_APP_USER],
@@ -571,6 +579,25 @@ await test(
             }),
           ])
             assert.equal(response.status, 403);
+        },
+      );
+      await t.test(
+        'HTTP correlation validates external IDs and associates authentication rejection without sensitive metadata',
+        async () => {
+          const id = randomUUID();
+          const response = await fetch(`${env.AUTH_API_ORIGIN}/auth/me`, {
+            headers: { 'x-correlation-id': id },
+          });
+          assert.equal(response.status, 401);
+          assert.equal(response.headers.get('x-correlation-id'), id);
+          const replacement = await fetch(`${env.AUTH_API_ORIGIN}/auth/me`, {
+            headers: { 'x-correlation-id': 'untrusted-input' },
+          });
+          assert.equal(replacement.status, 401);
+          assert.match(
+            replacement.headers.get('x-correlation-id'),
+            /^[0-9a-f]{8}-[0-9a-f-]{27}$/,
+          );
         },
       );
       await t.test(
@@ -728,6 +755,7 @@ await test(
             'company',
             'membership',
             'migrations',
+            'operation',
             'organizational_unit',
             'persistence_probe',
             'sessions',
@@ -771,6 +799,7 @@ await test(
               const structure = await service.createTenant(
                 label,
                 `${label} group`,
+                organizationOperation(),
               );
               for (const path of [
                 '/memberships',

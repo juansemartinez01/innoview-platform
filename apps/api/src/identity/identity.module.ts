@@ -1,3 +1,4 @@
+import { securityEvent, databaseFailure } from '../security/security-events.js';
 import {
   BadRequestException,
   Body,
@@ -46,7 +47,8 @@ export class IdentityService {
         issuer: principal.issuer,
         externalSubject: principal.subject,
       });
-    } catch {
+    } catch (error) {
+      securityEvent(databaseFailure(error));
       throw new ServiceUnavailableException('Identity persistence unavailable');
     }
   }
@@ -75,7 +77,8 @@ export class IdentityService {
         issuer: principal.issuer,
         externalSubject: principal.subject,
       });
-    } catch {
+    } catch (error) {
+      securityEvent(databaseFailure(error));
       throw new ServiceUnavailableException('Identity persistence unavailable');
     }
     if (!identity) throw new NotFoundException('Local identity not registered');

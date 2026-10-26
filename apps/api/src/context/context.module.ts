@@ -1,3 +1,4 @@
+import { securityEvent, databaseFailure } from '../security/security-events.js';
 import type { EntityManager } from 'typeorm';
 import {
   BadRequestException,
@@ -112,7 +113,8 @@ export class ContextService {
           },
         )) ?? []
       );
-    } catch {
+    } catch (error) {
+      securityEvent(databaseFailure(error));
       throw new ServiceUnavailableException('Context verification unavailable');
     }
   }
@@ -125,6 +127,7 @@ export class ContextService {
       );
     } catch (error) {
       if (error instanceof NotFoundException) throw error;
+      securityEvent(databaseFailure(error));
       throw new ServiceUnavailableException('Context verification unavailable');
     }
   }

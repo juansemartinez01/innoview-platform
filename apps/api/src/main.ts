@@ -12,6 +12,10 @@ async function bootstrap(): Promise<void> {
   const { NestFactory } = await import('@nestjs/core');
   const { AppModule } = await import('./app.module.js');
   const app = await NestFactory.create(AppModule);
+  const { correlate, HttpSecurityErrors } =
+    await import('./security/http-security.js');
+  app.use(correlate);
+  app.useGlobalFilters(new HttpSecurityErrors());
   app.enableShutdownHooks();
   await app.listen(Number(process.env.API_PORT ?? 3002), '127.0.0.1');
 }

@@ -97,6 +97,14 @@ OrganizationsTenantRls1793016000000 es la octava migración. Aditiva, preserva f
 
 IdentityReadTransactions limpia ambos contextos LOCAL; TenantReadTransactions deriva UUID del principal validado, verifica pertenencia y disponibilidad y fija tenant LOCAL dentro del mismo snapshot/manager. No persiste esa autoridad en UserIdentity/JWT/BFF. El contexto desaparece con commit/rollback. Las operaciones empresariales futuras necesitarán permisos y alcance adicionales: RLS no concede acceso funcional a compañías/sucursales ni resiste SQL arbitrario que modifique los GUC. Revocación confirmada afecta scopes nuevos, no cancela snapshots iniciados. ADR-036.
 
+## Operaciones Organizations y procedencia — 2.3a
+
+OrganizationOperations1793023200000 agrega `organizations.operation`: request_id UUID PK global, tenant_id UUID FK RESTRICT nullable durante creación, operation_type, fingerprint SHA-256 v1, actor/actor_type, actor_identity_id UUID FK RESTRICT a Identity, reason, technical_source, result JSONB y fechas created_at/completed_at. La PK global impide reutilizar un request en otro tenant. Resultado, tenant y finalización son obligatorios al commit mediante constraint diferida; el operador solo puede finalizar una fila pendiente y no modificar historia completada ni eliminar. ENABLE/FORCE, políticas exactas y acceso exclusivo del operador Organizations; no hay grants a API/BFF ni al operador Memberships. Índice (tenant_id,created_at), sin defaults de objetos futuros ni limpieza automática.
+
+Audit_event conserva los campos históricos y agrega actor_type, actor_identity_id FK, reason, technical_source y operation_request_id FK RESTRICT al registro. Eventos anteriores quedan LEGACY_UNVERIFIED, sin inventar FK/procedencia; actor y request antiguos no se cambian. Nuevos eventos técnicos provienen del registro abierto por el invocador confiable. USER_IDENTITY es representable con FK y CHECK de correspondencia, pero no puede usarse aún desde servicio/trigger. No se asume que un operador técnico sea una identidad empresarial. Una operación produce varios eventos, por lo que audit_event.request_id **no** es único; índice operation_request_id para trazabilidad.
+
+Huella determinista y retorno original, incluidos timestamps; omisión/null/valor diferenciados y comparación adicional de contexto. READ COMMITTED y ON CONFLICT/relectura, lock tenant antes del FK y registro/datos/eventos/proyección atómicos. Retención durable: no reciclar request UUID ni borrar resultados sin política de archivo revisada; payload privado solo operador/backups. Memberships no cambia su modelo/historial/semántica; comparte solo el tipo mínimo de operación. Operación de actualización y límites: ADR-037/OPERATIONS_RUNBOOK.md. No se crean entidades RBAC.
+
 ## Authorization — posterior
 
 - Permission: código estable namespaceado, p.ej. sales.orders.read; proviene de módulo.

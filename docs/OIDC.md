@@ -1,6 +1,6 @@
 # Identity — contrato OIDC y runtime BFF
 
-Contrato OIDC v2 sin cambios. Fases 0/1 cerradas, 2.1 aprobado y 2.2 pendiente de revisión: contexto identidad/tenant LOCAL y RLS Memberships/Organizations (ADR-035/036). No hay RBAC; los GUC no autentican ni resisten SQL arbitrario. Sesiones y selector conservados.
+Contrato OIDC v2 sin cambios. Fases 0/1 cerradas, 2.1 aprobado y 2.2 aprobado; 2.3a pendiente de revisión: contexto identidad/tenant LOCAL y RLS Memberships/Organizations (ADR-035/036). No hay RBAC; los GUC no autentican ni resisten SQL arbitrario. Sesiones y selector conservados.
 
 ## Autoridad, clientes y scopes
 

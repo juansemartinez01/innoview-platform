@@ -1,3 +1,4 @@
+import { organizationOperation } from '../operations/fixtures.spec.js';
 import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -61,7 +62,11 @@ export async function verifyMembershipRls(
     const idEmpty = (await identities.resolve(empty)).id;
     const tenants = await Promise.all(
       ['RLS A', 'RLS A second', 'RLS B', 'RLS rollback'].map((name) =>
-        organizations.createTenant(name, `${name} group`),
+        organizations.createTenant(
+          name,
+          `${name} group`,
+          organizationOperation(),
+        ),
       ),
     );
     const op = () => ({

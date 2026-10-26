@@ -1,3 +1,4 @@
+import { organizationOperation } from '../operations/fixtures.spec.js';
 import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import type { EntityManager } from 'typeorm';
 import assert from 'node:assert/strict';
@@ -35,43 +36,74 @@ export async function verifyOrganizations(
 ) {
   const operator = await initializeOrganizationsOperatorDataSource(env);
   const service = new OrganizationsService(operator);
+  let integrityTenant = '';
   const transaction = <T>(operation: (manager: EntityManager) => Promise<T>) =>
     operator.transaction(async (manager) => {
+      const request = randomUUID();
       await manager.query(
-        "SELECT set_config('innoview.organization_actor','fixture:integrity',true),set_config('innoview.organization_request',$1,true)",
-        [randomUUID()],
+        "SELECT set_config('innoview.organization_actor','fixture:integrity',true),set_config('innoview.organization_request',$1,true),set_config('innoview.organization_reason','Integrity fixture',true),set_config('innoview.organization_actor_type','SYSTEM',true)",
+        [request],
       );
-      return operation(manager);
+      await manager.query(
+        "INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source) VALUES($1,$2,'CREATE_COMPANY',$3,'fixture:integrity','SYSTEM','Integrity fixture','isolated fixture')",
+        [request, integrityTenant, '0'.repeat(64)],
+      );
+      const result = await operation(manager);
+      await manager.query(
+        "UPDATE organizations.operation SET result='{}',completed_at=clock_timestamp() WHERE request_id=$1",
+        [request],
+      );
+      return result;
     });
   const query = <T = unknown>(
     sql: string,
     parameters?: unknown[],
-  ): Promise<T> => transaction((manager) => manager.query<T>(sql, parameters));
+  ): Promise<T> =>
+    sql.startsWith('SELECT')
+      ? operator.query<T>(sql, parameters)
+      : transaction((manager) => manager.query<T>(sql, parameters));
   try {
-    const a = await service.createTenant('Fixture A', 'Group A');
-    const b = await service.createTenant('Fixture B', 'Group B');
+    const a = await service.createTenant(
+      'Fixture A',
+      'Group A',
+      organizationOperation(),
+    );
+    integrityTenant = a.tenant.id;
+    const b = await service.createTenant(
+      'Fixture B',
+      'Group B',
+      organizationOperation(),
+    );
     const ac = await service.createCompany(
       a.tenant.id,
       a.group.id,
       'Company A',
       'TEST-A',
+      organizationOperation(),
     );
     const bc = await service.createCompany(
       b.tenant.id,
       b.group.id,
       'Company B',
+      undefined,
+      organizationOperation(),
     );
     const ab = await service.createBranch(
       a.tenant.id,
       ac.company.id,
       'Branch A',
+      organizationOperation(),
     );
 
     await t.test(
       'Organizations: two independent complete tenants and derived hierarchy with one status owner',
       async () => {
-        const first = await service.getStructure(a.tenant.id);
-        const second = await service.getStructure(b.tenant.id);
+        const first = await operator.transaction((manager) =>
+          service.getStructure(a.tenant.id, manager),
+        );
+        const second = await operator.transaction((manager) =>
+          service.getStructure(b.tenant.id, manager),
+        );
         assert.equal(first.group.id, a.unit.id);
         assert.deepEqual(first.units.map((u) => u.type).sort(), [
           'BRANCH',
@@ -190,11 +222,22 @@ export async function verifyOrganizations(
           (error) => state(error, '23503'),
         );
         await assert.rejects(
-          service.createCompany(a.tenant.id, b.group.id, 'Wrong'),
+          service.createCompany(
+            a.tenant.id,
+            b.group.id,
+            'Wrong',
+            undefined,
+            organizationOperation(),
+          ),
           OrganizationOperationError,
         );
         await assert.rejects(
-          service.createBranch(a.tenant.id, bc.company.id, 'Wrong'),
+          service.createBranch(
+            a.tenant.id,
+            bc.company.id,
+            'Wrong',
+            organizationOperation(),
+          ),
           OrganizationOperationError,
         );
       },
@@ -262,7 +305,11 @@ export async function verifyOrganizations(
           'SELECT count(*)::int AS count FROM organizations.tenant',
         );
         await assert.rejects(
-          service.createTenant('Rollback tenant', '   '),
+          service.createTenant(
+            'Rollback tenant',
+            '   ',
+            organizationOperation(),
+          ),
           OrganizationOperationError,
         );
         assert.deepEqual(
@@ -313,11 +360,19 @@ export async function verifyOrganizations(
       async () => {
         const results = await Promise.all(
           Array.from({ length: 6 }, (_, i) =>
-            service.createCompany(a.tenant.id, a.group.id, `Concurrent ${i}`),
+            service.createCompany(
+              a.tenant.id,
+              a.group.id,
+              `Concurrent ${i}`,
+              undefined,
+              organizationOperation(),
+            ),
           ),
         );
         assert.equal(new Set(results.map((r) => r.company.id)).size, 6);
-        const structure = await service.getStructure(a.tenant.id);
+        const structure = await operator.transaction((manager) =>
+          service.getStructure(a.tenant.id, manager),
+        );
         assert.equal(structure.companies.length, 7);
         assert.equal(
           structure.units.filter((u) => u.type === 'COMPANY').length,
@@ -332,31 +387,39 @@ export async function verifyOrganizations(
         const lifecycle = await service.createTenant(
           'State fixture',
           'State group',
+          organizationOperation(),
         );
         const company = await service.createCompany(
           lifecycle.tenant.id,
           lifecycle.group.id,
           'State company',
+          undefined,
+          organizationOperation(),
         );
         const branch = await service.createBranch(
           lifecycle.tenant.id,
           company.company.id,
           'State branch',
+          organizationOperation(),
         );
         await service.setStatus(
           lifecycle.tenant.id,
           company.company.id,
           'INACTIVE',
+          organizationOperation(),
         );
         await assert.rejects(
           service.createBranch(
             lifecycle.tenant.id,
             company.company.id,
             'Rejected',
+            organizationOperation(),
           ),
           OrganizationOperationError,
         );
-        const structure = await service.getStructure(lifecycle.tenant.id);
+        const structure = await operator.transaction((manager) =>
+          service.getStructure(lifecycle.tenant.id, manager),
+        );
         assert.equal(
           structure.units.find((u) => u.id === branch.branch.id)?.status,
           'ACTIVE',
@@ -365,38 +428,64 @@ export async function verifyOrganizations(
           lifecycle.tenant.id,
           branch.branch.id,
           'INACTIVE',
+          organizationOperation(),
         );
         await assert.rejects(
-          service.setStatus(lifecycle.tenant.id, branch.branch.id, 'ACTIVE'),
+          service.setStatus(
+            lifecycle.tenant.id,
+            branch.branch.id,
+            'ACTIVE',
+            organizationOperation(),
+          ),
           OrganizationOperationError,
         );
         await service.setStatus(
           lifecycle.tenant.id,
           company.company.id,
           'ACTIVE',
+          organizationOperation(),
         );
         await service.setStatus(
           lifecycle.tenant.id,
           branch.branch.id,
           'ACTIVE',
+          organizationOperation(),
         );
-        await service.setStatus(lifecycle.tenant.id, null, 'INACTIVE');
+        await service.setStatus(
+          lifecycle.tenant.id,
+          null,
+          'INACTIVE',
+          organizationOperation(),
+        );
         await assert.rejects(
           service.createCompany(
             lifecycle.tenant.id,
             lifecycle.group.id,
             'Rejected',
+            undefined,
+            organizationOperation(),
           ),
           OrganizationOperationError,
         );
-        await service.setStatus(lifecycle.tenant.id, null, 'ACTIVE');
+        await service.setStatus(
+          lifecycle.tenant.id,
+          null,
+          'ACTIVE',
+          organizationOperation(),
+        );
         await service.setStatus(
           lifecycle.tenant.id,
           company.company.id,
           'ARCHIVED',
+          organizationOperation(),
         );
         await assert.rejects(
-          service.setStatus(lifecycle.tenant.id, company.company.id, 'ACTIVE'),
+          service.setStatus(
+            lifecycle.tenant.id,
+            company.company.id,
+            'ACTIVE',
+            organizationOperation(),
+          ),
           OrganizationOperationError,
         );
         await assert.rejects(
@@ -417,18 +506,25 @@ export async function verifyOrganizations(
           lifecycle.tenant.id,
           null,
           'ARCHIVED',
+          organizationOperation(),
         );
         const repeated = await service.setStatus(
           lifecycle.tenant.id,
           null,
           'ARCHIVED',
+          organizationOperation(),
         );
         assert.equal(
           repeated.updatedAt.getTime(),
           archived.updatedAt.getTime(),
         );
         await assert.rejects(
-          service.setStatus(lifecycle.tenant.id, null, 'INACTIVE'),
+          service.setStatus(
+            lifecycle.tenant.id,
+            null,
+            'INACTIVE',
+            organizationOperation(),
+          ),
           OrganizationOperationError,
         );
       },
@@ -524,7 +620,11 @@ export async function verifyOrganizations(
           0,
         );
         await assert.rejects(
-          new OrganizationsService(app).createTenant('Forbidden', 'Forbidden'),
+          new OrganizationsService(app).createTenant(
+            'Forbidden',
+            'Forbidden',
+            organizationOperation(),
+          ),
           OrganizationOperationError,
         );
         const changes = await migrator.driver.createSchemaBuilder().log();

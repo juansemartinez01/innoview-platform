@@ -1,5 +1,17 @@
 # Arquitectura técnica — v0.3
 
+## Hardening transversal — 2.3a
+
+Base 2.2 aprobada en 9175804; 2.3a implementado pendiente de revisión. ADR-037 actualiza únicamente los contratos de escritura/auditoría y lectura Organizations y agrega límites/observabilidad/diagnósticos; no implementa RBAC. Los apartados 1.x/2.2 describen su estado histórico, extendido aquí.
+
+Organizations recibe OrganizationOperation explícito con TrustedOperation compartido (actor/reason/requestId) y actorType técnico; no deriva autoridad del OS ni genera requestId por intento. Registro de operaciones global y eventos de auditoría separados, atómicos con la estructura/directorio. Resultado durable e idempotencia mediante PK + READ COMMITTED/ON CONFLICT/relectura; conflictos seguros y serialización de tenant antes del FK. Retención sin TTL. Actor USER_IDENTITY tiene FK preparada pero está rechazado hasta contar con flujo administrativo autorizado; legado no se reatribuye. No hay dependencia circular ni framework de auditoría.
+
+getStructure requiere el EntityManager contextual suministrado, del mismo DataSource y con transacción activa, sin camino de transacción propia. El backend app comprueba identidad/tenant antes de leer. El operador conserva su contrato técnico bajo políticas propias. Los launchers mantienen credenciales operativas fuera de API/BFF, sin variables nuevas. Timeouts por rol se aplican al abrir conexiones nuevas, diferenciados de migrador/bootstrap. Correlation HTTP controlada y eventos estructurados mínimos no incluyen datos de identidad, secretos o SQL; los fallos de persistencia se clasifican antes de sanitizar respuestas.
+
+db:diagnose usa el operador Organizations, nunca HTTP. Inventario de catálogo/columnas/ACL/políticas con excepciones no-RLS explícitas; dependencia SQL Memberships/directorio contrastada sin cambiar políticas. Comparación read-only completa de proyección y fuente bajo snapshot, sin repair/bypass. Runbook exige intervención administrativa revisada por incidente; reparación soportada y bootstrap desde cero verificado en CI se programan para 2.5.
+
+Separar garantías: RLS actual protege pertenencias por identidad y tablas privadas por tenant; autorización entre empresas/sucursales del mismo tenant llegará en 2.4 y se verificará en 2.5. Archivos/procesos/jobs futuros siguen fuera de este alcance. Snapshot en curso no se revoca instantáneamente; GUC y timeouts no resisten SQL arbitrario del mismo rol. OPERATIONS_RUNBOOK.md/ADR-037 detallan matriz y limitaciones.
+
 ## Stack y distribución
 
 - Monorepo pnpm Workspaces + Turborepo.
@@ -109,7 +121,7 @@ Este contexto es una preferencia revocable de navegación, sin permisos, rol o a
 
 ## Contexto tenant y RLS Organizations — 2.2 (ADR-036)
 
-2.1 aprobado en 55a1b29; 2.2 pendiente de revisión. Esta sección concreta y extiende los alcances históricos descritos para 1.x/2.1. No introduce RBAC ni rutas empresariales.
+2.1 aprobado en 55a1b29; 2.2 aprobado en 9175804. Esta sección concreta y extiende los alcances históricos descritos para 1.x/2.1. No introduce RBAC ni rutas empresariales.
 
 El acceso pretenant no abre las tablas privadas. Organizations posee `tenant_directory`, proyección materializada mínima de UUID/nombres de tenant y grupo, más disponibilidad derivada. Triggers invocantes diferidos la sincronizan en el mismo commit; no se consulta una vista con privilegios de dueño. API recibe SELECT de esas cinco columnas exactas, sin grants futuros, y RLS por pertenencia ACTIVE de la identidad LOCAL. Las políticas Memberships se aplican a la subconsulta. Joins con estructuras privadas siguen cerrados sin tenant LOCAL. RLS no protege columnas automáticamente: por eso tax_id/empresas/sucursales no forman parte del directorio, y columnas nuevas no heredan acceso.
 

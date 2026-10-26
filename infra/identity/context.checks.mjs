@@ -1,3 +1,9 @@
+const organizationOperation = () => ({
+  actor: 'fixture:trusted-operator',
+  actorType: 'SYSTEM',
+  reason: 'Discardable integration fixture',
+  requestId: randomUUID(),
+});
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
@@ -56,21 +62,33 @@ export async function verifyContext(t, h) {
     await login(empty, undefined, undefined, 'runtime-legacy');
     const identityA = (await first.session()).identity.id;
     const identityB = (await second.session()).identity.id;
-    const a = await organization.createTenant('Context tenant A', 'Group A');
-    const b = await organization.createTenant('Context tenant B', 'Group B');
+    const a = await organization.createTenant(
+      'Context tenant A',
+      'Group A',
+      organizationOperation(),
+    );
+    const b = await organization.createTenant(
+      'Context tenant B',
+      'Group B',
+      organizationOperation(),
+    );
     const c = await organization.createTenant(
       'Context foreign tenant C',
       'Group C',
+      organizationOperation(),
     );
     const company = await organization.createCompany(
       a.tenant.id,
       a.group.id,
       'Private company A',
+      undefined,
+      organizationOperation(),
     );
     await organization.createBranch(
       a.tenant.id,
       company.company.id,
       'Private branch A',
+      organizationOperation(),
     );
     await membership.register(a.tenant.id, identityA, operation());
     await membership.register(b.tenant.id, identityA, operation());
@@ -432,26 +450,61 @@ export async function verifyContext(t, h) {
       async () => {
         let current = await view();
         assert.equal(current.selected.id, b.tenant.id);
-        await organization.setStatus(b.tenant.id, b.group.id, 'INACTIVE');
+        await organization.setStatus(
+          b.tenant.id,
+          b.group.id,
+          'INACTIVE',
+          organizationOperation(),
+        );
         current = await view();
         assert.equal(current.selected, null);
         assert.equal(current.invalidated, true);
         assert.ok(!current.options.some((o) => o.id === b.tenant.id));
         assert.equal((await select(b.tenant.id, current.revision)).status, 404);
-        await organization.setStatus(b.tenant.id, b.group.id, 'ACTIVE');
-        await organization.setStatus(b.tenant.id, null, 'INACTIVE');
+        await organization.setStatus(
+          b.tenant.id,
+          b.group.id,
+          'ACTIVE',
+          organizationOperation(),
+        );
+        await organization.setStatus(
+          b.tenant.id,
+          null,
+          'INACTIVE',
+          organizationOperation(),
+        );
         current = await view();
         assert.ok(!current.options.some((o) => o.id === b.tenant.id));
         assert.equal((await select(b.tenant.id, current.revision)).status, 404);
-        await organization.setStatus(b.tenant.id, null, 'ACTIVE');
+        await organization.setStatus(
+          b.tenant.id,
+          null,
+          'ACTIVE',
+          organizationOperation(),
+        );
         current = await view();
         assert.equal((await select(a.tenant.id, current.revision)).status, 200);
         current = await view();
-        await organization.setStatus(a.tenant.id, a.group.id, 'INACTIVE');
+        await organization.setStatus(
+          a.tenant.id,
+          a.group.id,
+          'INACTIVE',
+          organizationOperation(),
+        );
         assert.equal((await select(a.tenant.id, current.revision)).status, 404);
         assert.equal((await storedSession(first, 0)).selected_tenant_id, null);
-        await organization.setStatus(a.tenant.id, a.group.id, 'ACTIVE');
-        await organization.setStatus(b.tenant.id, null, 'ARCHIVED');
+        await organization.setStatus(
+          a.tenant.id,
+          a.group.id,
+          'ACTIVE',
+          organizationOperation(),
+        );
+        await organization.setStatus(
+          b.tenant.id,
+          null,
+          'ARCHIVED',
+          organizationOperation(),
+        );
         current = await view();
         assert.ok(!current.options.some((o) => o.id === b.tenant.id));
         assert.equal((await select(b.tenant.id, current.revision)).status, 404);
