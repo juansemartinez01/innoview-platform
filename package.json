@@ -29,7 +29,8 @@
     "db:create": "pnpm --filter @innoview/api db:create",
     "db:generate": "pnpm --filter @innoview/api db:generate",
     "db:revert": "pnpm --filter @innoview/api db:revert",
-    "oidc:migrate:logout": "node --env-file-if-exists=.env infra/keycloak/cli.mjs migrate-logout"
+    "oidc:migrate:logout": "node --env-file-if-exists=.env infra/keycloak/cli.mjs migrate-logout",
+    "memberships:bootstrap": "pnpm --filter @innoview/api memberships:bootstrap"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

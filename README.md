@@ -1,6 +1,6 @@
 # Innoview Platform
 
-Fase 0 cerrada e incrementos 1.1–1.3 aprobados. Incremento 1.4: Organizations interno implementado, pendiente revisión. Fuente de verdad: AGENTS.md y docs/. Sin endpoints organizacionales, membresías, autorización empresarial ni aislamiento RLS.
+Fase 0 cerrada e incrementos 1.1–1.4 aprobados. Incremento 1.5: Memberships interno implementado, pendiente revisión. Fuente de verdad: AGENTS.md y docs/. Sin endpoints organizacionales o de administración de membresías, autorización empresarial ni aislamiento RLS.
 
 ## Requisitos
 
@@ -23,7 +23,7 @@ pnpm install --frozen-lockfile
 pnpm exec node --version
 ```
 
-Crear `.env` con trece contraseñas/claves aleatorias e independientes, sin imprimirlas. Este comando **falla si el archivo ya existe**; para un entorno existente conservarlo y agregar únicamente las variables faltantes de `.env.example`.
+Crear `.env` con catorce contraseñas/claves aleatorias e independientes, sin imprimirlas. Este comando **falla si el archivo ya existe**; para un entorno existente conservarlo y agregar únicamente las variables faltantes de `.env.example`.
 
 ```powershell
 @'
@@ -52,7 +52,7 @@ pnpm oidc:provision
 pnpm oidc:check
 ```
 
-Resultado esperado: tres servicios `healthy` y las cuatro migraciones FoundationProbe/BffSessions/UserIdentity/Organizations marcadas `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`. El login de aplicaciones usa cuentas del realm innoview, no administradores master.
+Resultado esperado: tres servicios `healthy` y las cinco migraciones FoundationProbe/BffSessions/UserIdentity/Organizations/Memberships marcadas `[X]`. Keycloak está en http://127.0.0.1:8080/admin/ con usuario `local_admin` y la contraseña de KEYCLOAK_ADMIN_PASSWORD en tu `.env`. El login de aplicaciones usa cuentas del realm innoview, no administradores master.
 
 Validar calidad y pruebas en PostgreSQL y Keycloak temporales independientes:
 
@@ -102,6 +102,24 @@ Las páginas permiten login/logout y muestran identidad técnica. GET /auth/me v
 ## Límites actuales
 
 identity-bff tiene dos consumidores Next.js reales; sin paquetes vacíos, módulos comerciales ni worker. Organizations contiene Tenant/BusinessGroup/Company/Branch/OU con integridad transaccional, sin rutas públicas. Sin Membership, RBAC, RLS ni UoW genérico. Keycloak conserva cuentas y contraseñas empresariales; UserIdentity solo referencia issuer/sub con UUID propio. Integridad por tenant no equivale a autorización ni aislamiento de lectura.
+
+## Memberships interno — 1.5
+
+Conservar volúmenes y credenciales anteriores. Agregar `DB_MEMBERSHIP_USER=innoview_membership_operator` y `DB_MEMBERSHIP_PASSWORD` a `.env`: contraseña nueva e independiente, al menos 16 caracteres (recomendado 32 bytes aleatorios en hex). Repetir `pnpm db:provision`, `pnpm db:run` y `pnpm db:show`. No editar migraciones anteriores. `memberships` queda administrado por el migrador; API solo consulta `membership`, el operador escribe con grants limitados y BFF no accede al esquema. No inyectar credenciales operativas en despliegues API/BFF; los launchers BFF las filtran y la API no las requiere.
+
+MembershipsService expone internamente register, listForIdentity, listActiveForIdentity, isActive, revoke y bootstrapFirst. Las escrituras exigen un DataSource operativo explícito; el provider de NestJS usa el rol API de lectura y las rechaza. No hay controllers, autoafiliación al login, selector ni permisos administrativos. ACTIVE significa pertenencia, sin autorizar datos; REVOKED es terminal. Cada solicitud futura deberá releer la pertenencia y comprobar también disponibilidad del tenant; no confiar en JWT/cookie/frontend.
+
+El bootstrap lo realiza el operador autorizado del entorno, fuera de HTTP, sobre UUID existentes seleccionados explícitamente. Desde la raíz, reemplazar los tres UUID y el motivo:
+
+```powershell
+pnpm memberships:bootstrap --tenant-id <tenant-uuid> --user-identity-id <identity-uuid> --request-id <operation-uuid> --reason "Alta inicial autorizada; referencia al cambio aprobado"
+```
+
+El request UUID identifica una transición material y sus reintentos; conservarlo. El CLI deriva actor de host/cuenta OS y devuelve solo UUID/estado/changed/auditEventId. Solo crea la primera pertenencia del tenant; otro candidato o historial previo de origen distinto bloquea la operación. Repetir el bootstrap original devuelve su estado actual, incluso REVOKED, sin reactivar ni agregar privilegios. Repeticiones sin cambios devuelven el evento original, no consumen nuevos request UUID ni generan auditorías ficticias. Las siguientes altas/revocaciones requieren un consumidor interno confiable explícito con credenciales operativas; no se publica una API administrativa en 1.5.
+
+Auditoría `memberships.audit_event`: CREATED/REVOKED, actor, rol PostgreSQL efectivo, motivo, fuente, request UUID y fecha; inserción por triggers en la misma transacción, sin modificaciones ni borrados runtime. Inspección solo por operador/migrador, no API/BFF. No incluir secretos en el motivo. Esto no es auditoría resistente a un migrador/operador del host privilegiado.
+
+`pnpm test` ejecuta CLI real repetido y concurrente, altas muchos-a-muchos, revocaciones, FK/UNIQUE/clave compuesta, rechazo de escrituras no autorizadas y reconciliación de ACL contra PostgreSQL descartable; también login/logout/refresh reales con Keycloak y ausencia de autoafiliación/endpoints. No crea tenants o identidades reales ni ejecuta bootstrap sin UUID explícitos en tu base habitual. Diseño de consulta pretenant fail-closed para Fase 2: ADR-032 y ARCHITECTURE.md. **Todavía no hay RLS ni aislamiento de lecturas por usuario/tenant en SQL.**
 
 ## Organizations interno — 1.4
 
@@ -293,4 +311,4 @@ También verifica aprovisionamiento OIDC real, discovery/JWKS, grants/redirects/
 
 [GitHub Actions](https://github.com/juansemartinez01/innoview-platform/actions/workflows/ci.yml) ejecuta instalación congelada, lint, formato, tipos, tests y build en cada push y pull request. Crea PostgreSQL/Keycloak temporales con contraseñas aleatorias y los detiene al terminar. No depende de servicios locales ni secretos de producción, no despliega y tiene permisos de solo lectura. Las acciones están fijadas por SHA.
 
-Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Próximos incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No avanzar a Memberships sin revisión de 1.4.**
+Informe de Fase 0 aprobada: [docs/FOUNDATION.md](docs/FOUNDATION.md). Contrato y runtime: [docs/OIDC.md](docs/OIDC.md). Próximos incrementos: [docs/IMPLEMENTATION_PLAN.md](docs/IMPLEMENTATION_PLAN.md). **No avanzar a 1.6 sin revisión de 1.5.**

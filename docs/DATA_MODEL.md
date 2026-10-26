@@ -12,7 +12,7 @@
 
 ### Concreción 1.4 — ADR-030
 
-Implementado en 1.4, pendiente revisión: OrganizationalUnit guarda nombre/estado/fechas y cada BusinessGroup/Company/Branch comparte su UUID con una sola OU del tipo correcto. La pertenencia estructural reside únicamente en Company.business_group_id y Branch.company_id; el padre de OU se deriva al consultar. No se crea una columna parent_id independiente que pueda quedar desincronizada. Tablas del módulo: organizations.tenant, organizational_unit, business_group, company y branch.
+Implementado y aprobado en 1.4: OrganizationalUnit guarda nombre/estado/fechas y cada BusinessGroup/Company/Branch comparte su UUID con una sola OU del tipo correcto. La pertenencia estructural reside únicamente en Company.business_group_id y Branch.company_id; el padre de OU se deriva al consultar. No se crea una columna parent_id independiente que pueda quedar desincronizada. Tablas del módulo: organizations.tenant, organizational_unit, business_group, company y branch.
 
 Cada registro salvo Tenant lleva tenant_id. OU tiene PK UUID y UNIQUE(tenant_id,id) disponible para futuras referencias por alcance, además de UNIQUE(tenant_id,id,type) para sus subtipos. BusinessGroup/Company/Branch tienen PK(tenant_id,id) y unit_type GENERATED ALWAYS STORED constante GROUP/COMPANY/BRANCH. FK compuestas enlazan cada subtipo a su OU y cada empresa/sucursal a su padre del mismo tenant. UNIQUE(tenant_id) en BusinessGroup impone el máximo de un grupo; triggers de constraint diferidos exigen al commit exactamente uno y ninguna OU huérfana. La estructura acíclica por tipos sustituye una relación recursiva libre. UUID, pertenencia y relaciones son inmutables; RESTRICT y ausencia de DELETE runtime protegen dependencias.
 
@@ -45,13 +45,29 @@ La migración local aditiva fue aplicada y consultada, y generate --check no pro
 - No hay email, contraseñas, tokens, perfil, tenant, roles ni membresías en UserIdentity. Resolución idempotente mediante INSERT ON CONFLICT DO NOTHING y lectura posterior con snapshot nuevo; conserva UUID y fechas al repetir. updated_at se inicializa al crear y no es last_login; aún no hay operaciones de modificación de identidad.
 - La API solo obtiene la pareja desde un access token verificado. PUT /identity/me registra/resuelve y GET /identity/me consulta la identidad propia; /auth/me mantiene el principal OIDC sin persistencia. No existe búsqueda pública por UUID ajeno ni administración de identidades.
 - El esquema vacío se aprovisiona con bootstrap, como los esquemas de Foundation; el migrador no recibe CREATE global sobre la base. La migración UserIdentity1792922400000 valida propiedad y crea la tabla/constraints. API solo tiene USAGE + SELECT/INSERT en identity, sin UPDATE/DELETE/DDL; BFF sin acceso. TypeORM registra la entidad con synchronize=false e installExtensions=false, sin instalar extensiones al arrancar.
-- No hay FK al IdP externo ni a organizaciones todavía. La PK UUID queda disponible para futuras referencias explícitas; ninguna se implementa en 1.3. Las pruebas verifican FK y RESTRICT con un objeto técnico exclusivamente descartable, sin crear Membership.
+- No hay FK al IdP externo. La PK UUID se referencia desde Memberships a partir de 1.5 mediante contrato explícito, sin duplicar issuer/sub ni consultar datos privados de Identity.
 - Cambiar issuer/sub o recrear una cuenta Keycloak produce otra identidad. No hay linking por email ni transferencia automática de privilegios; una futura vinculación requerirá una decisión y un procedimiento auditado.
-- Membership: user_id, tenant_id, estado (única por combinación), revocación.
+- Membership: implementada en 1.5; detalle debajo. Usa user_identity_id, nunca email ni UUID externo del IdP.
 - Invitation: email objetivo, token hash, expiración, creador, consumida/revocada.
 - ServiceAccount para integraciones máquina-máquina cuando se incorpore.
 
-## Authorization
+## Memberships — implementado en 1.5
+
+| Objeto                  | Columnas y restricciones                                                                                                                                                                                                                                           |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| memberships.membership  | UUID PK id; tenant_id UUID FK RESTRICT Organizations.Tenant.id; user_identity_id UUID FK RESTRICT Identity.UserIdentity.id; status ACTIVE/REVOKED; created_at/updated_at timestamptz; revoked_at timestamptz, revoked_by varchar(200), revoked_reason varchar(500) |
+| Unicidad                | UNIQUE(tenant_id,user_identity_id) en todo el historial; UNIQUE(tenant_id,id) para futuras FK RoleAssignment por tenant, sin implementar esa entidad                                                                                                               |
+| Estado                  | ACTIVE exige revocación nula; REVOKED exige fecha/actor/motivo. Guard DB impide reactivación y cambios de UUID/referencias/creación. Revocar no borra fila y no hay dos pertenencias históricas para la misma pareja                                               |
+| Directorio              | Índice (user_identity_id,status), sin joins a datos privados. Puede devolver pertenencias de varios tenants; no equivale a acceso empresarial                                                                                                                      |
+| memberships.audit_event | UUID PK; tenant_id/membership_id FK compuesta RESTRICT; CREATED/REVOKED; BOOTSTRAP/TRUSTED; actor, motivo, request_id UUID UNIQUE, rol DB efectivo, created_at. UNIQUE(membership_id,event_type), sin duplicar perfil/organización                                 |
+
+Migración Memberships1792994400000 aditiva, sin modificar las anteriores. Esquema vacío aprovisionado explícitamente; tablas/funciones propiedad del migrador. synchronize=false. FK sin cascadas y ausencia de DELETE/TRUNCATE runtime conservan historial y referencias; triggers también impiden DELETE ordinario al migrador. El propietario sigue siendo privilegiado para DDL y no constituye una barrera frente a él. Reversión solo con protecciones descartables del CLI y sin CASCADE.
+
+API tiene USAGE y SELECT sobre membership; sin escritura ni lectura de audit_event. Operador independiente: SELECT/INSERT sobre ambas tablas y UPDATE(status,updated_at) en membership; sin ownership/DDL/SUPERUSER/BYPASSRLS ni acceso a tablas Identity/Organizations/sesiones/historial. INSERT directo en auditoría se rechaza: únicamente el trigger de transición puede generarlo. El contexto técnico de auditoría es obligatorio; cambios materiales y evento son atómicos mediante SECURITY INVOKER. Nuevas tablas de Memberships no heredan grants amplios; repetir el aprovisionamiento reconcilia también ACL por columna.
+
+Registrar ACTIVE es idempotente; registrar REVOKED falla. Revocar repetidamente conserva primer evento/fecha/motivo. Reactivación no permitida; habilitarla posteriormente requiere decisión explícita, migración y política auditada. Bootstrap solo crea la primera pertenencia de un tenant existente, con UUID Identity existente; reintento original devuelve estado actual, sin reactivar ni dar permisos. No confundir pertenencia con disponibilidad de Tenant/OU. Revocación se releerá desde DB en cada solicitud posterior; diseño pretenant compatible con RLS fail-closed documentado en ADR-032, todavía no implementado ni validado como aislamiento.
+
+## Authorization — posterior
 
 - Permission: código estable namespaceado, p.ej. sales.orders.read; proviene de módulo.
 - Role: tenant, nombre, rol interno, bandera de sistema.

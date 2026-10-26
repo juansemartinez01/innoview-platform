@@ -120,6 +120,8 @@ await test(
       DB_PORTAL_PASSWORD: secret(),
       DB_CONTROL_USER: `test_control_${suffix}`,
       DB_CONTROL_PASSWORD: secret(),
+      DB_MEMBERSHIP_USER: `test_membership_${suffix}`,
+      DB_MEMBERSHIP_PASSWORD: secret(),
       PORTAL_COOKIE_PASSWORD: secret(),
       PORTAL_TOKEN_PASSWORD: secret(),
       CONTROL_COOKIE_PASSWORD: secret(),
@@ -611,9 +613,11 @@ await test(
             "SELECT table_name FROM information_schema.tables WHERE table_schema NOT IN ('pg_catalog','information_schema') AND table_type='BASE TABLE'",
           );
           assert.deepEqual(tables.map((row) => row.table_name).sort(), [
+            'audit_event',
             'branch',
             'business_group',
             'company',
+            'membership',
             'migrations',
             'organizational_unit',
             'persistence_probe',
@@ -623,6 +627,26 @@ await test(
             'typeorm_metadata',
             'user_identity',
           ]);
+        },
+      );
+      await t.test(
+        'login never creates memberships or implies tenant access',
+        async () => {
+          assert.equal(
+            (
+              await migrator.query(
+                'SELECT count(*)::int AS count FROM memberships.membership',
+              )
+            )[0].count,
+            0,
+          );
+          for (const method of ['POST', 'DELETE']) {
+            const response = await fetch(`${env.AUTH_API_ORIGIN}/memberships`, {
+              method,
+              headers: { authorization: `Bearer ${portalData.access}` },
+            });
+            assert.equal(response.status, 404);
+          }
         },
       );
       await t.test(
@@ -640,6 +664,8 @@ await test(
                 `${label} group`,
               );
               for (const path of [
+                '/memberships',
+                `/memberships/${structure.tenant.id}`,
                 '/organizations',
                 '/organizations/tenants',
                 `/organizations/tenants/${structure.tenant.id}`,
@@ -1125,6 +1151,7 @@ await test(
           'DB_MIGRATOR_USER',
           'DB_PORTAL_USER',
           'DB_CONTROL_USER',
+          'DB_MEMBERSHIP_USER',
         ])
           await bootstrap.query(`DROP ROLE ${pg.escapeIdentifier(env[key])}`);
       }

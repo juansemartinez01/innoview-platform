@@ -10,14 +10,15 @@ export async function provisionDatabase(
   const migrator = connectionConfig('migrator', env);
   const portal = connectionConfig('portal', env);
   const control = connectionConfig('control', env);
-  const configs = [bootstrap, app, migrator, portal, control];
-  const runtime = [app, portal, control];
+  const membership = connectionConfig('membership', env);
+  const configs = [bootstrap, app, migrator, portal, control, membership];
+  const runtime = [app, portal, control, membership];
   const runtimeNames = runtime
     .map((c) => pg.escapeIdentifier(c.user))
     .join(', ');
   if (
-    new Set(configs.map((c) => c.user)).size !== 5 ||
-    new Set(configs.map((c) => c.password)).size !== 5
+    new Set(configs.map((c) => c.user)).size !== 6 ||
+    new Set(configs.map((c) => c.password)).size !== 6
   ) {
     throw new Error(
       'Bootstrap, migrator and app must use independent credentials',
@@ -41,6 +42,7 @@ export async function provisionDatabase(
       [migrator, 'migrator'],
       [portal, 'portal'],
       [control, 'control'],
+      [membership, 'membership'],
     ] as const) {
       const marker = `innoview:${bootstrap.database}:${kind}`;
       const existing = await client.query<{ marker: string | null }>(
@@ -82,7 +84,7 @@ export async function provisionDatabase(
     if (databaseOwner.rowCount)
       throw new Error('Migrator must not own databases');
     const outsideSchemas = await client.query(
-      "SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions','identity','organizations')",
+      "SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions','identity','organizations','memberships')",
       [migrator.user],
     );
     if (outsideSchemas.rowCount)
@@ -103,6 +105,7 @@ export async function provisionDatabase(
       'control_sessions',
       'identity',
       'organizations',
+      'memberships',
     ]) {
       const owner = await client.query<{ owner: string }>(
         'SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname=$1',
@@ -173,14 +176,15 @@ export async function provisionDatabase(
     // Table REVOKE does not remove column ACLs. Reconcile all managed
     // organization columns too, before granting the exact status-only updates.
     const columns = await client.query<{
+      schema_name: string;
       table_name: string;
       columns: string[];
     }>(
-      "SELECT c.relname AS table_name,array_agg(a.attname::text ORDER BY a.attnum) AS columns FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid WHERE n.nspname='organizations' AND c.relkind='r' AND a.attnum>0 AND NOT a.attisdropped GROUP BY c.relname",
+      "SELECT n.nspname AS schema_name,c.relname AS table_name,array_agg(a.attname::text ORDER BY a.attnum) AS columns FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid WHERE n.nspname IN ('organizations','memberships') AND c.relkind='r' AND a.attnum>0 AND NOT a.attisdropped GROUP BY n.nspname,c.relname",
     );
     for (const row of columns.rows)
       await client.query(
-        `REVOKE ALL (${row.columns.map(q).join(',')}) ON TABLE organizations.${q(row.table_name)} FROM PUBLIC, ${runtimeNames}`,
+        `REVOKE ALL (${row.columns.map(q).join(',')}) ON TABLE ${q(row.schema_name)}.${q(row.table_name)} FROM PUBLIC, ${runtimeNames}`,
       );
     await client.query(`GRANT USAGE ON SCHEMA organizations TO ${q(app.user)}`);
     await client.query(
@@ -198,6 +202,26 @@ export async function provisionDatabase(
         await client.query(
           `GRANT UPDATE(status,updated_at) ON organizations.${q(table)} TO ${q(app.user)}`,
         );
+    }
+    await client.query(
+      `GRANT USAGE ON SCHEMA memberships TO ${q(app.user)}, ${q(membership.user)}`,
+    );
+    const memberTable = await client.query<{ exists: boolean }>(
+      "SELECT to_regclass('memberships.membership') IS NOT NULL AS exists",
+    );
+    if (memberTable.rows[0]?.exists) {
+      await client.query(
+        `GRANT SELECT ON memberships.membership TO ${q(app.user)}`,
+      );
+      await client.query(
+        `GRANT SELECT, INSERT ON memberships.membership TO ${q(membership.user)}`,
+      );
+      await client.query(
+        `GRANT UPDATE(status,updated_at) ON memberships.membership TO ${q(membership.user)}`,
+      );
+      await client.query(
+        `GRANT SELECT, INSERT ON memberships.audit_event TO ${q(membership.user)}`,
+      );
     }
     await client.query('COMMIT');
   } catch {

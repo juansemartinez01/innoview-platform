@@ -5,28 +5,48 @@ export async function administrator(config) {
     throw new Error(
       'Set the local Keycloak admin password (minimum 16 characters)',
     );
-  const response = await fetch(
-    `${config.baseUrl}/realms/master/protocol/openid-connect/token`,
-    {
-      method: 'POST',
-      signal: AbortSignal.timeout(10000),
-      redirect: 'error',
-      body: new URLSearchParams({
-        grant_type: 'password',
-        client_id: 'admin-cli',
-        username: config.adminUser,
-        password: config.adminPassword,
-      }),
-    },
-  );
-  if (!response.ok)
-    throw new Error(
-      `Local Keycloak administration authentication failed (${response.status}); credentials omitted`,
+  let token;
+  let expiresAt = 0;
+  let acquiring;
+  async function acquire() {
+    if (token && Date.now() < expiresAt) return;
+    acquiring ??= authenticate().finally(() => {
+      acquiring = undefined;
+    });
+    await acquiring;
+  }
+  async function authenticate() {
+    const response = await fetch(
+      `${config.baseUrl}/realms/master/protocol/openid-connect/token`,
+      {
+        method: 'POST',
+        signal: AbortSignal.timeout(10000),
+        redirect: 'error',
+        body: new URLSearchParams({
+          grant_type: 'password',
+          client_id: 'admin-cli',
+          username: config.adminUser,
+          password: config.adminPassword,
+        }),
+      },
     );
-  const { access_token: token } = await response.json();
-  if (typeof token !== 'string')
-    throw new Error('Invalid administration response');
+    if (!response.ok)
+      throw new Error(
+        `Local Keycloak administration authentication failed (${response.status}); credentials omitted`,
+      );
+    const result = await response.json();
+    if (
+      typeof result.access_token !== 'string' ||
+      !Number.isFinite(result.expires_in) ||
+      result.expires_in <= 0
+    )
+      throw new Error('Invalid administration response');
+    token = result.access_token;
+    expiresAt = Date.now() + Math.max(0, result.expires_in - 10) * 1000;
+  }
+  await acquire();
   return async function request(path, { method = 'GET', body } = {}) {
+    await acquire();
     const result = await fetch(`${config.baseUrl}/admin/${path}`, {
       method,
       headers: {

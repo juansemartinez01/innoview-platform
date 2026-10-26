@@ -403,6 +403,26 @@ await test('real disposable Keycloak: reproducible OIDC contract, tokens and saf
   );
 
   await t.test(
+    'administrative helper renews an expired short-lived token on disposable Keycloak',
+    async () => {
+      const master = (await request('realms/master')).data;
+      try {
+        await request('realms/master', {
+          method: 'PUT',
+          body: { ...master, accessTokenLifespan: 1 },
+        });
+        const shortLived = await administrator(config);
+        await new Promise((resolve) => setTimeout(resolve, 1500));
+        const results = await Promise.all(
+          Array.from({ length: 4 }, () => shortLived('realms/master')),
+        );
+        assert.ok(results.every((result) => result.status === 200));
+      } finally {
+        await request('realms/master', { method: 'PUT', body: master });
+      }
+    },
+  );
+  await t.test(
     'unmanaged innoview realm is refused and preserved (disposable server only)',
     async () => {
       await request(`realms/${REALM}`, { method: 'DELETE' });
