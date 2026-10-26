@@ -15,7 +15,7 @@ concurrency:
 jobs:
   quality:
     name: Quality and build
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     env:
       NEXT_TELEMETRY_DISABLED: '1'
@@ -43,7 +43,12 @@ jobs:
       - name: Check types
         run: pnpm typecheck
       - name: Install headless Chromium for Portal context verification
-        run: pnpm exec playwright install --with-deps --only-shell chromium
+        timeout-minutes: 5
+        # This hosted image already includes browser runtime libraries. Avoid
+        # upgrading unrelated OS/fonts from a slow apt mirror; prove readiness.
+        run: |
+          pnpm exec playwright install --only-shell chromium
+          pnpm exec node --input-type=module -e "import { chromium } from 'playwright'; const browser = await chromium.launch({ headless: true }); await browser.close();"
       - name: Generate disposable service credentials
         shell: bash
         run: |
