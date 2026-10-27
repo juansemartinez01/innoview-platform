@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import { hostname, userInfo } from 'node:os';
 import { performance } from 'node:perf_hooks';
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { candidateQueries, summarizePlan } from './candidates.mjs';
 import { disposableAuthorization } from './disposable.mjs';
 import { BENCHMARK_SEED, benchmarkTenant, seededUuid } from './dataset.mjs';
 import {
@@ -85,12 +86,9 @@ async function fixtureOperation(source, module, tenant, type, label, write) {
     return result;
   });
 }
-function nodes(plan) {
-  return [plan, ...(plan.Plans ?? []).flatMap(nodes)];
-}
 const expectations = {
   grants:
-    'Tenant/member/scope B-tree access to role_assignment, then role/permission joins; no full cross-tenant assignment scan.',
+    'Tenant/member index access; inline queries may repeat nested membership/directory checks. Materialized grants should bound role/RP checks to tenant roles, not assignments. DISTINCT permissions/scopes remove fanout. No full cross-tenant assignment scan.',
   revision: 'Primary-key access to tenant_revision.',
   ancestors:
     'Fixed GROUP/COMPANY/BRANCH joins with explicit tenant predicates, no recursive tree.',
@@ -259,10 +257,24 @@ try {
       if (tenant.index % 100 === 0)
         console.info(JSON.stringify({ seededTenants: tenant.index + 1 }));
     }
-    stage = 'analyze';
-    await sources.migrator.query(
-      'ANALYZE "authorization".role_assignment;ANALYZE "authorization".role_permission;ANALYZE "authorization".role;ANALYZE "authorization".tenant_revision;ANALYZE memberships.membership;ANALYZE organizations.organizational_unit;ANALYZE organizations.company;ANALYZE organizations.branch;ANALYZE organizations.tenant_directory',
-    );
+    stage = 'vacuum';
+    // VACUUM cannot run in a transaction. Owner role, all RLS/triggers kept.
+    for (const relation of [
+      '"authorization".role_assignment',
+      '"authorization".role_permission',
+      '"authorization".role',
+      '"authorization".permission',
+      '"authorization".tenant_revision',
+      'memberships.membership',
+      'identity.user_identity',
+      'organizations.tenant',
+      'organizations.business_group',
+      'organizations.organizational_unit',
+      'organizations.company',
+      'organizations.branch',
+      'organizations.tenant_directory',
+    ])
+      await sources.migrator.query('VACUUM (ANALYZE) ' + relation);
     const scope = new TenantReadTransactions(
       new IdentityReadTransactions(
         sources.app,
@@ -272,6 +284,25 @@ try {
       new OrganizationsService(sources.app),
     );
     const plans = [];
+    // Preserve the approved pre-VACUUM reference across repeated executions.
+    const approved = JSON.parse(
+      await readFile(
+        new URL('./benchmark-result.json', import.meta.url),
+        'utf8',
+      ),
+    );
+    const baseline =
+      approved.approvedBaseline ??
+      approved.plans
+        .filter((p) => p.query === 'grants')
+        .map((p) => ({
+          tenantClass: p.tenantClass,
+          executionMs: p.executionMs,
+          rows: p.actualRows ?? p.nodes[0].rows,
+          sharedHits: p.sharedHits ?? p.nodes[0].sharedHits,
+          preparation: 'ANALYZE only; no VACUUM',
+        }));
+    const comparisons = [];
     for (const tenant of [tenants[0], tenants[1]]) {
       const principal = {
         issuer: 'https://benchmark.invalid',
@@ -320,14 +351,8 @@ try {
             'EXPLAIN(ANALYZE,BUFFERS,FORMAT JSON) ' + query.sql,
             query.params,
           );
-          const summary = nodes(plan.Plan).map((node) => ({
-            type: node['Node Type'],
-            relation: node['Relation Name'],
-            index: node['Index Name'],
-            rows: node['Actual Rows'],
-            loops: node['Actual Loops'],
-            sharedHits: node['Shared Hit Blocks'],
-          }));
+          const details = summarizePlan(plan);
+          const summary = details.nodes;
           if (
             summary.some(
               (node) =>
@@ -340,11 +365,69 @@ try {
           plans.push({
             tenantClass: tenant.index === 0 ? 'large' : 'small',
             query: name,
-            executionMs: plan['Execution Time'],
-            nodes: summary,
+            ...details,
           });
         }
       });
+    }
+    for (const tenant of [tenants[0], tenants[1]]) {
+      const principal = {
+        issuer: 'https://benchmark.invalid',
+        subject: tenant.identities[0].subject,
+        clientId: 'innoview-portal',
+      };
+      // Exactly one current scope/membership check per transaction via the
+      // existing owner contracts. Policies still perform every nested check.
+      const queries = await scope.read(
+        principal,
+        tenant.id,
+        async (manager) => {
+          const [m] = await manager.query(
+            "SELECT id FROM memberships.membership WHERE tenant_id=$1 AND user_identity_id=$2 AND status='ACTIVE'",
+            [tenant.id, tenant.identities[0].id],
+          );
+          return candidateQueries(tenant.id, m.id, tenant.companies[0].id);
+        },
+      );
+      for (const query of queries) {
+        stage = `candidate:${tenant.index}:${query.strategy}:${query.name}`;
+        await scope.read(principal, tenant.id, async (manager) => {
+          const [
+            {
+              'QUERY PLAN': [plan],
+            },
+          ] = await manager.query(
+            'EXPLAIN(ANALYZE,BUFFERS,FORMAT JSON) ' + query.sql,
+            query.params,
+          );
+          const details = summarizePlan(plan);
+          const values = await manager.query(query.sql, query.params);
+          const expected =
+            query.name === 'permissions'
+              ? 2
+              : query.name === 'scopes'
+                ? 1 + 2 * tenant.companies.length
+                : 1;
+          if (
+            values.length !== expected ||
+            (query.name === 'exact' && values[0].allowed !== true)
+          )
+            throw new Error('Candidate semantic mismatch');
+          if (
+            details.nodes.some(
+              (n) => n.type === 'Seq Scan' && n.relation === 'role_assignment',
+            )
+          )
+            throw new Error('Unbounded assignment scan');
+          plans.push({
+            tenantClass: tenant.index === 0 ? 'large' : 'small',
+            query: query.name,
+            strategy: query.strategy,
+            sql: query.sql,
+            ...details,
+          });
+        });
+      }
     }
     stage = 'operator-plan';
     await sources.authorization.transaction(
@@ -365,12 +448,8 @@ try {
           'EXPLAIN(ANALYZE,BUFFERS,FORMAT JSON) SELECT id FROM "authorization".role_assignment WHERE tenant_id=$1',
           [tenants[1].id],
         );
-        const summary = nodes(plan.Plan).map((n) => ({
-          type: n['Node Type'],
-          relation: n['Relation Name'],
-          index: n['Index Name'],
-          condition: n['Index Cond'],
-        }));
+        const details = summarizePlan(plan);
+        const summary = details.nodes;
         if (
           !summary.some((n) =>
             ['Index Scan', 'Index Only Scan', 'Bitmap Index Scan'].includes(
@@ -382,8 +461,7 @@ try {
         plans.push({
           tenantClass: 'small',
           query: 'operator',
-          executionMs: plan['Execution Time'],
-          nodes: summary,
+          ...details,
         });
       },
     );
@@ -455,6 +533,28 @@ try {
       ).rows !== '500'
     )
       throw new Error('Unexpected fixture volume');
+    for (const plan of baseline)
+      comparisons.push({
+        tenantClass: plan.tenantClass,
+        previousPreparation: plan.preparation,
+        previousMs: plan.executionMs,
+        previousRows: plan.rows,
+        previousSharedHits: plan.sharedHits,
+        current: plans
+          .filter(
+            (p) => p.tenantClass === plan.tenantClass && p.query === 'grants',
+          )
+          .map(({ executionMs, actualRows, sharedHits, sharedReads }) => ({
+            executionMs,
+            actualRows,
+            sharedHits,
+            sharedReads,
+          })),
+        comparableLatency: false,
+      });
+    const indexFootprint = await sources.migrator.query(
+      "SELECT c.relname AS index,pg_relation_size(c.oid)::bigint AS bytes FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='authorization' AND c.relkind='i' AND c.relname IN ('assignment_member_scope','uq_active_role_assignment','assignment_tenant') ORDER BY c.relname",
+    );
     return {
       seed: BENCHMARK_SEED,
       node: process.version,
@@ -463,6 +563,13 @@ try {
       roleAssignments: 50000,
       seedDurationMs: performance.now() - start,
       counts,
+      preparation:
+        'VACUUM (ANALYZE), outside transactions; all existing RLS policies unchanged',
+      assignmentIndex:
+        'Retain assignment_member_scope: measured exact-scope and small-membership index paths; no DDL or extra speculative index',
+      approvedBaseline: baseline,
+      indexFootprint,
+      comparisons,
       predictions: expectations,
       plans,
     };

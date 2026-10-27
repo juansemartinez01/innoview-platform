@@ -65,12 +65,56 @@ export class AuthorizationService {
     @Inject(ASSIGNMENT_REFERENCES)
     private readonly references?: AssignmentReferences,
   ) {}
+  private async operationContext(
+    manager: EntityManager,
+    tenantId: string,
+    op: TechnicalOperation,
+  ) {
+    const [role] = await manager.query<{ trusted: boolean }[]>(
+      "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':authorization' AS trusted FROM pg_roles WHERE rolname=current_user",
+    );
+    if (!role?.trusted)
+      throw new AuthorizationOperationError('OPERATOR_REQUIRED');
+    await establishOperationContext(manager, 'authorization', op, tenantId);
+  }
+  private async previous<T>(
+    manager: EntityManager,
+    tenantId: string,
+    op: TechnicalOperation,
+    fingerprint: string,
+  ): Promise<{ result: T } | undefined> {
+    const [old] = await manager.query<
+      {
+        fingerprint: string;
+        actor: string;
+        actor_type: string;
+        reason: string;
+        result: T;
+        completed_at: Date | null;
+      }[]
+    >(
+      'SELECT fingerprint,actor,actor_type,reason,result,completed_at FROM "authorization".operation WHERE tenant_id=$1 AND request_id=$2',
+      [tenantId, op.requestId],
+    );
+    if (!old) return undefined;
+    if (
+      old.fingerprint !== fingerprint ||
+      old.actor !== op.actor ||
+      old.actor_type !== op.actorType ||
+      old.reason !== op.reason
+    )
+      throw new AuthorizationOperationError('REQUEST_ID_CONFLICT');
+    if (!old.completed_at || old.result === null)
+      throw new AuthorizationOperationError('INCOMPLETE_OPERATION');
+    return { result: old.result };
+  }
   private async write<T>(
     tenantId: string,
     type: string,
     args: Record<string, unknown>,
     input: TechnicalOperation,
     action: (manager: EntityManager) => Promise<T>,
+    prepare?: () => Promise<void>,
   ): Promise<T> {
     let replay = false;
     try {
@@ -86,20 +130,34 @@ export class AuthorizationService {
           }),
         )
         .digest('hex');
+      let preparationError: unknown;
+      let preparationFailed = false;
+      if (prepare) {
+        const previous = await this.source.transaction(
+          'READ COMMITTED',
+          async (manager) => {
+            await manager.query('SET TRANSACTION READ ONLY');
+            await this.operationContext(manager, tenantId, op);
+            return this.previous<T>(manager, tenantId, op, fingerprint);
+          },
+        );
+        if (previous) {
+          securityEvent('TRUSTED_OPERATION_REPLAY', op.requestId);
+          return previous.result;
+        }
+        // No Authorization connection/transaction is held during owner reads.
+        // A failure is deferred until UNIQUE has resolved a concurrent replay.
+        try {
+          await prepare();
+        } catch (error) {
+          preparationFailed = true;
+          preparationError = error;
+        }
+      }
       const result = await this.source.transaction(
         'READ COMMITTED',
         async (manager) => {
-          const [role] = await manager.query<{ trusted: boolean }[]>(
-            "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':authorization' AS trusted FROM pg_roles WHERE rolname=current_user",
-          );
-          if (!role?.trusted)
-            throw new AuthorizationOperationError('OPERATOR_REQUIRED');
-          await establishOperationContext(
-            manager,
-            'authorization',
-            op,
-            tenantId,
-          );
+          await this.operationContext(manager, tenantId, op);
           const inserted = await manager.query<{ request_id: string }[]>(
             `INSERT INTO "authorization".operation(request_id,tenant_id,operation_type,fingerprint,fingerprint_version,actor,actor_type,reason,technical_source)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(request_id) DO NOTHING RETURNING request_id`,
@@ -116,32 +174,18 @@ export class AuthorizationService {
             ],
           );
           if (!inserted.length) {
-            const [old] = await manager.query<
-              {
-                fingerprint: string;
-                actor: string;
-                actor_type: string;
-                reason: string;
-                result: T;
-                completed_at: Date | null;
-              }[]
-            >(
-              'SELECT fingerprint,actor,actor_type,reason,result,completed_at FROM "authorization".operation WHERE tenant_id=$1 AND request_id=$2',
-              [tenantId, op.requestId],
+            const old = await this.previous<T>(
+              manager,
+              tenantId,
+              op,
+              fingerprint,
             );
-            if (
-              !old ||
-              old.fingerprint !== fingerprint ||
-              old.actor !== op.actor ||
-              old.actor_type !== op.actorType ||
-              old.reason !== op.reason
-            )
+            if (!old)
               throw new AuthorizationOperationError('REQUEST_ID_CONFLICT');
-            if (!old.completed_at || old.result === null)
-              throw new AuthorizationOperationError('INCOMPLETE_OPERATION');
             replay = true;
             return old.result;
           }
+          if (preparationFailed) throw preparationError;
           await manager.query(
             'INSERT INTO "authorization".tenant_revision(tenant_id) VALUES($1) ON CONFLICT(tenant_id) DO NOTHING',
             [tenantId],
@@ -281,14 +325,6 @@ export class AuthorizationService {
       { tenantId, membershipId, roleId, scope: { type, unitId } },
       operation,
       async (manager) => {
-        // Separate owner credentials/snapshots: explicit TOCTOU, revalidate all
-        // availability transactionally in the future evaluator, never cache it.
-        if (
-          !this.references ||
-          !(await this.references.membershipActive(tenantId, membershipId)) ||
-          !(await this.references.scopeAvailable(tenantId, unitId, type))
-        )
-          throw new AuthorizationOperationError('REFERENCE_UNAVAILABLE');
         const [assignment] = await manager.query<
           { id: string; status: string }[]
         >(
@@ -296,6 +332,16 @@ export class AuthorizationService {
           [tenantId, membershipId, roleId, unitId, type],
         );
         return assignment;
+      },
+      async () => {
+        // Separate owner snapshots before persistence: TOCTOU remains explicit.
+        // 2.4 must revalidate availability before granting effective access.
+        if (
+          !this.references ||
+          !(await this.references.membershipActive(tenantId, membershipId)) ||
+          !(await this.references.scopeAvailable(tenantId, unitId, type))
+        )
+          throw new AuthorizationOperationError('REFERENCE_UNAVAILABLE');
       },
     );
   }

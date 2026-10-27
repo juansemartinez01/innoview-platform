@@ -1,4 +1,5 @@
 import { verifyAuthorization } from '../authorization/authorization.spec.js';
+import { verifyAuthorizationPreparation } from '../authorization/preparation.spec.js';
 import {
   versionOneFixture,
   verifyVersionOneUpgrade,
@@ -621,6 +622,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await verifyHardening(t, app, migrator, env);
     await verifyOperationHardening(t, migrator, env);
     await verifyAuthorization(t, app, migrator, env);
+    await verifyAuthorizationPreparation(t, app, migrator, env);
 
     await t.test(
       'real migration reverts and reapplies only in this disposable database',

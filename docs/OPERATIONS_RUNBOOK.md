@@ -1,6 +1,45 @@
-# Operaciones técnicas y diagnóstico — contrato vigente 2.3b
+# Operaciones técnicas y diagnóstico — contrato vigente 2.3b.1
 
-Solo desarrollo local controlado; no es un despliegue productivo ni un instalador general. 2.3a/2.3a.1 oficialmente aprobados y cerrados en `0d92c34`. Modelo RBAC persistente de 2.3b pendiente de revisión; sin evaluador, Guards ni administración empresarial HTTP. Los apartados históricos debajo conservan su contexto; este apartado y ADR-039 tienen precedencia para el contrato actual.
+## Addendum 2.3b.1 — replay, pools y evidencia RBAC
+
+Base aprobada con condiciones: ee6757ee7b22346227f4f053876194342533af6d. No cambian credenciales, ACL, esquemas, índices ni dependencias. Detener escritores operativos, actualizar código y reiniciar sus pools; no borrar volúmenes ni modificar las once migraciones. `pnpm db:run` debe informar que no hay nuevas migraciones. Mantener show/diagnose y la secuencia de validación existente. No avanzar al evaluador/Guards de 2.4.
+
+### D-6 y D-8
+
+AuthorizationService.assign separa tres fases: (1) replay de solo lectura con rol/GUC verificados y transacción corta, (2) referencias ACTIVE mediante contratos propietarios, sin conexión/transacción retenida de Authorization, (3) escritura idempotente definitiva. Esta última intenta INSERT ON CONFLICT con la PK global requestId y vuelve a leer después del commit concurrente. Solo si realmente insertó una operación nueva puede aplicar el resultado o error de las comprobaciones previas. El error se conserva en memoria solo durante esa llamada, sin caché de disponibilidad. Si son inválidas, rollback revierte el registro pendiente antes de bloquear tenant_revision o modificar concesiones.
+
+Replay completado equivalente devuelve el JSON histórico incluso después de revocar Membership, archivar/desactivar unidad, inactivar rol o tenant. Otro tenant/tipo/actor/motivo/argumentos produce REQUEST_ID_CONFLICT permanente. Si una operación concurrente todavía no confirmó, UNIQUE espera con lock_timeout8s; si confirma se devuelve replay, y si revierte la operación nueva debe satisfacer sus propias referencias. Un timeout produce error técnico transitorio, nunca un falso conflicto ni registro parcial. No se guarda ningún marcador de validación en la sesión/JWT.
+
+Los pools de propietarios conservan acquisition timeout finito (5s normal). La saturación de pg-pool puede producir un Error sin SQLSTATE: solo los mensajes fijos conocidos del driver **sin code** se clasifican como POOL_ACQUISITION_TIMEOUT; jamás se registran mensajes driver/SQL ni secretos. Resolver la causa y reintentar con el mismo requestId; no bucles ilimitados. Las pruebas usan pools reales de una conexión, comprueban que la espera sigue pendiente durante SELECT FOR UPDATE NOWAIT de tenant_revision y que no existe una transacción Authorization idle. Después verifican error recuperable, ausencia de operación/eventos y recuperación con replay. No se conceden permisos de lectura privada ajena a Authorization.
+
+D-8 comprueba current_setting(lock_timeout)=8s dentro del trigger de una asignación real, la retiene deliberadamente 1,6 s y revoca la Membership mientras está pendiente. Una segunda solicitud debe esperar/reproducir el resultado original, sin duplicados; al terminar vuelve a 1 s y sin GUC. Las pruebas anteriores de rollback/55P03/pool físico único continúan. La asignación guardada nunca sustituye la evaluación empresarial.
+
+### D-1 / D-2 / D-3: consultas candidatas
+
+Ejecutar `pnpm authorization:benchmark` con compose.test.yaml saludable, como en el apartado siguiente. Solo bases/roles generados descartables; carga fija con semilla innoview-authorization-20261026-v1, 500 tenants / 50.000 asignaciones, mismo sesgo y conteos que 2.3b. La membership grande tiene 420 asignaciones y la pequeña 20. Se ejecuta VACUUM (ANALYZE) por tabla mediante el propietario migrador, **fuera de cualquier BEGIN**, sin desactivar RLS/triggers ni conceder nuevos privilegios. No es una recomendación de ejecutar mantenimiento sobre datos habituales.
+
+`infra/authorization/candidates.mjs` contiene solo SQL de benchmark. Compara variantes NOT MATERIALIZED y MATERIALIZED de validación de tenant/membership, unidades disponibles/ancestros y concesiones rol/permiso/asignación. Cada consulta utiliza una nueva transacción TenantReadTransactions: el prechequeo propietario de disponibilidad se realiza una vez dentro del snapshot actual; los CTE materializados evitan expandir repetidamente sus conjuntos. **Las políticas siguen ejecutando todos sus controles anidados**; prevalidar no omite RLS ni autoriza reutilizar comprobaciones de una transacción anterior. Se filtran estados ACTIVE de tenant, unidad/ancestros, membership, rol, RolePermission, RoleAssignment y Permission, con tenant/membership explícitos. Jerarquía fija, scopes exactos sin herencia.
+
+El artefacto registra EXPLAIN(ANALYZE,BUFFERS,FORMAT JSON) completo y resumen de cada nodo: filas estimadas/reales, loops, shared hits/reads, Index Cond, Filter, Rows Removed by Filter/Recheck y Heap Fetches cuando existan. `rlsWork` señala nodos Membership/tenant_directory, incluidos los chequeos explícitos de membership; los contadores de nodos anidados son inclusivos y se superponen. **No sumarlos como costo independiente ni presentar su tiempo como una medida aislada de RLS.** Plan raw permite inspeccionar subplanes, condiciones y estimaciones.
+
+| Consulta / tenant | Inline filas / hits / ms | Materializada filas / hits / ms |
+| ----------------- | ------------------------ | ------------------------------- |
+| Permisos grande   | 2 / 11.118 / 19,185      | 2 / 4.914 / 14,352              |
+| Scopes grande     | 21 / 252.968 / 230,031   | 21 / 4.914 / 11,255             |
+| Exacta grande     | 1 (true) / 112 / 0,474   | 1 (true) / 155 / 0,892          |
+| Permisos pequeño  | 2 / 10.147 / 10,524      | 2 / 455 / 0,767                 |
+| Scopes pequeño    | 5 / 5.526 / 4,887        | 5 / 455 / 0,853                 |
+| Exacta pequeño    | 1 (true) / 94 / 0,528    | 1 (true) / 171 / 0,457          |
+
+En scopes grande, la variante inline repite la búsqueda de asignaciones 21 filas × 420 loops; la materializada lee 420 filas × 1 loop y comparte ese conjunto con los joins. Membership/directorio siguen apareciendo en los subplanes RLS y constituyen costo relevante incluso en la variante mejorada. Recomendación para 2.4: partir de conjuntos materializados de asignaciones/concesiones/unidades dentro de la transacción actual para permisos/scopes, y búsqueda puntual con EXISTS para concesión exacta. Validar de nuevo sobre la implementación real y distribuciones mayores; no convertir este SQL en un servicio productivo en 2.3b.1.
+
+D-2: conservar assignment_member_scope. La búsqueda exacta usa Index Only Scan con tenant_id/membership_id/scope_type/scope_unit_id como Index Cond, 1 fila / 1 loop y 0 Heap Fetches tras VACUUM. También se usa para 20 asignaciones de la membership pequeña. Ocupa 7.946.240 bytes en esta carga, además del UNIQUE parcial (7.503.872 bytes) y assignment_tenant (3.260.416 bytes). Tiene costo de mantenimiento por cada escritura activa, pero cubre un acceso medido que el benchmark anterior omitía; no se ha demostrado que quitarlo mejore el balance. No se cambia orden, no se elimina, no se agregan índices alternativos ni migración especulativa. Las 50.000 altas y sus triggers/auditoría continúan ejecutándose bajo roles reales.
+
+Comparación histórica preservada en approvedBaseline: la consulta antigua grande devuelve 400 filas, con 9.261 hits / 7,522 ms antes; después de VACUUM, la misma forma devuelve 400 filas con 5.057 hits / 6,324 ms. VACUUM permite más accesos index-only sin visitas al heap y cambia estadísticas/visibilidad; hay calentamiento de buffers, muestreo y carga del host compartido. Las consultas nuevas además proyectan DISTINCT y validan ancestros: **sus latencias no son directamente comparables con la consulta antigua**, ni hay SLA/umbral temporal CI. Entorno Windows/Docker Desktop, PostgreSQL 18.6, Node 24.22.1; las mediciones definitivas del evaluador quedan en 2.4. Benchmark pesado separado de CI ordinaria.
+
+Riesgos mantenidos: D-4 uuid::text en Organizations y D-5 evolución histórica de huellas Authorization al cierre de Fase 2; D-7 obliga a filtrar rol INACTIVE en 2.4 sin borrar historia; uq_role_tenant_name conserva el nombre reservado incluso INACTIVE. A-2/operador Organizations amplio y reparación soportada de tenant_directory quedan en 2.5, junto a instalación desde cero. TOCTOU entre propietarios, GUC modificables por SQL arbitrario, snapshots ya abiertos y advertencia conocida TypeORM/pg permanecen.
+
+Solo desarrollo local controlado; no es un despliegue productivo ni un instalador general. Modelo RBAC persistente de 2.3b aprobado con condiciones en ee6757e; 2.3b.1 pendiente de revisión, sin evaluador, Guards ni administración empresarial HTTP. Los apartados históricos debajo conservan su contexto; ADR-040 y el addendum superior tienen precedencia para el contrato actual.
 
 ## Actualización 2.3b y separación de actores
 

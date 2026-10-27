@@ -64,6 +64,17 @@ export class TrustedOperationTransientError extends Error {
   }
 }
 export function transientFailure(error: unknown): string | null {
+  // pg-pool acquisition timeout has no SQLSTATE/code. Match only its fixed
+  // diagnostic, never log the message or treat arbitrary SQL errors as retryable.
+  if (
+    error instanceof Error &&
+    !('code' in error) &&
+    [
+      'timeout exceeded when trying to connect',
+      'Connection terminated due to connection timeout',
+    ].includes(error.message)
+  )
+    return 'POOL_ACQUISITION_TIMEOUT';
   const code =
     typeof error === 'object' && error !== null && 'code' in error
       ? error.code

@@ -1,6 +1,12 @@
 # Innoview Platform
 
-Fases 0 y 1 cerradas; 2.3a/2.3a.1 aprobados y cerrados en `0d92c34`. **2.3b implementa el modelo RBAC persistente, pendiente de revisión.** No hay evaluador de permisos, Guards empresariales ni endpoints administrativos. ADR-039 y el runbook describen el contrato vigente; los apartados anteriores conservan su contexto histórico. No comenzar 2.4 sin revisión.
+Fases 0 y 1 cerradas; 2.3b aprobado con condiciones en `ee6757ee7b22346227f4f053876194342533af6d`. **2.3b.1 corrige preparación concurrente de asignaciones y mide consultas candidatas RBAC; pendiente de revisión.** No hay evaluador de permisos, Guards empresariales ni endpoints administrativos. ADR-040 y el runbook describen el contrato vigente; los apartados anteriores conservan su contexto histórico. No comenzar 2.4 sin revisión.
+
+## Preparación del evaluador — 2.3b.1
+
+`assign()` primero comprueba replay en una transacción corta de solo lectura. Si no encuentra una operación completada equivalente, consulta a Memberships/Organizations sin retener conexión, transacción o locks de Authorization. La escritura idempotente definitiva vuelve a resolver concurrencia mediante UNIQUE antes de aceptar o rechazar las referencias. Un replay conserva el resultado original aunque cambien pertenencia, tenant, unidad o rol; no crea una nueva concesión ni demuestra acceso actual. Una operación nueva sigue validando referencias vigentes. Errores de adquisición de pools se convierten en fallos transitorios seguros; registro/datos/auditoría no quedan parcialmente confirmados.
+
+Sin nuevos privilegios, dependencias o migraciones. `pnpm authorization:benchmark` conserva 500 tenants/50.000 asignaciones descartables y añade prototipos SQL de permisos, scopes y concesión exacta, con variantes inline/materializadas. Ejecuta VACUUM (ANALYZE) fuera de transacciones y guarda todos los planes JSON, filas/loops, buffers, filtros, condiciones de índice y heap fetches. Se conserva `assignment_member_scope` porque los planes representativos lo utilizan; no se crean índices especulativos. No hay servicios funcionales can/permissionsFor/scopesFor. Procedimiento y resultados en [runbook](docs/OPERATIONS_RUNBOOK.md); decisiones y riesgos en ADR-040.
 
 ## Modelo RBAC — 2.3b
 

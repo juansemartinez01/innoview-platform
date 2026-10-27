@@ -2,6 +2,8 @@
 
 ## Authorization — persistencia implementada en 2.3b
 
+2.3b.1 / ADR-040 no modifica el esquema: se conserva `assignment_member_scope` por evidencia real de consultas exactas y por membership; no hay migración adicional. `uq_role_tenant_name` es UNIQUE sin filtro de estado: un rol INACTIVE conserva reservado su nombre en ese tenant. Cambiar esa semántica exige decisión explícita. Una asignación ACTIVE puede referenciar un rol posteriormente INACTIVE; es historia válida y 2.4 debe excluirlo de concesiones efectivas. Los contadores/versiones no cambian en un replay ni prueban disponibilidad actual. La refactorización del prechequeo no implementa versionado histórico de huellas Authorization (D-5 sigue pendiente del cierre de Fase 2).
+
 ADR-039 y migración 11 `AuthorizationModel1793037600000`; migraciones anteriores intactas. Esquema SQL `"authorization"`. No se agregan permisos implícitos a Identity, Membership o login.
 
 | Tabla           | Identidad y restricciones                                                                                                                                    | Ciclo de vida                                                                                              |
