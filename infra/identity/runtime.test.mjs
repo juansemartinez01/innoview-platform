@@ -6,6 +6,7 @@ const organizationOperation = () => ({
 });
 import assert from 'node:assert/strict';
 import { verifyContext } from './context.checks.mjs';
+import { verifyAccessHttp } from '../authorization/http.checks.mjs';
 import { test } from 'node:test';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
@@ -993,6 +994,7 @@ await test(
         portal,
         control,
       });
+      await verifyAccessHttp(t, { env, login, Browser, migrator, sensitive });
       await t.test(
         'state and nonce tampering consume the transaction and cannot establish a session',
         async () => {

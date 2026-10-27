@@ -32,6 +32,7 @@
     "oidc:migrate:logout": "node --env-file-if-exists=.env infra/keycloak/cli.mjs migrate-logout",
     "memberships:bootstrap": "pnpm --filter @innoview/api memberships:bootstrap",
     "db:diagnose": "pnpm --filter @innoview/api db:diagnose",
+    "authorization:rls:benchmark": "pnpm --filter @innoview/api build && node --env-file-if-exists=.env infra/authorization/rls-benchmark.mjs",
     "authorization:benchmark": "pnpm --filter @innoview/api build && node --env-file-if-exists=.env infra/authorization/benchmark.mjs"
   },
   "devDependencies": {

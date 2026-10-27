@@ -1,5 +1,13 @@
 # Modelo de datos — diseño inicial, no migración definitiva
 
+## Actualización 2.4 / ADR-041
+
+Migración12 `IndexableIdentityTenantRls1793124000000`, aditiva/transaccional: cambia USING de app SELECT/RESTRICTIVE en Membership, directorio y cinco tablas Organizations; conserva WITH CHECK(false), roles/permisos, ENABLE/FORCE y políticas operativas. UUID=contexto UUID validado por CASE, nunca columna_uuid::text en esas igualdades. Ausencia/vacío/formato inválido produce NULL/denegación, sin 22P02. Down solo restaura las expresiones anteriores en bases descartables; migraciones 1–11 intactas. No hay tablas, índices, columnas, seeds habituales ni credenciales nuevas.
+
+El modelo RBAC ya se evalúa: ACTIVE de relación no equivale a permiso efectivo. Se requieren estados vigentes de Role/Permission/Membership/Tenant/unidad y ancestros, sin borrar historia para desactivar efectos. GROUP/COMPANY/BRANCH exactos, sin herencia. uq_role_tenant_name reserva nombre incluso INACTIVE. Permission DEPRECATED conserva referencias pero nunca autoriza. Consulta de scopes/permisos deduplica asociaciones de varios roles y filtra unidades indisponibles.
+
+La consistencia proviene de una transacción RR app validada, no de catalog_version/tenant_revision aislados. Las lecturas de pertenencia/estructura y datos autorizados comparten manager/snapshot. Datos existentes y sesiones no se modifican por E-1. D-5 sigue a cargo del responsable de Authorization/Core, supervisado por Director técnico y Auditor, con fecha objetivo incremento 2.5 **antes del cierre de Fase 2**; no cambiar CURRENT_FINGERPRINT_VERSION sin compatibilidad histórica Authorization.
+
 ## Authorization — persistencia implementada en 2.3b
 
 2.3b.1 / ADR-040 no modifica el esquema: se conserva `assignment_member_scope` por evidencia real de consultas exactas y por membership; no hay migración adicional. `uq_role_tenant_name` es UNIQUE sin filtro de estado: un rol INACTIVE conserva reservado su nombre en ese tenant. Cambiar esa semántica exige decisión explícita. Una asignación ACTIVE puede referenciar un rol posteriormente INACTIVE; es historia válida y 2.4 debe excluirlo de concesiones efectivas. Los contadores/versiones no cambian en un replay ni prueban disponibilidad actual. La refactorización del prechequeo no implementa versionado histórico de huellas Authorization (D-5 sigue pendiente del cierre de Fase 2).

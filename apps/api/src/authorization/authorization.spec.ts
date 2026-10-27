@@ -980,17 +980,26 @@ export async function verifyAuthorization(
       },
     );
     await t.test(
-      'Authorization port: versioned contract has no permissive provider/controller; API cannot perform trusted writes',
+      'Authorization port: registered evaluator is separate from trusted writes; API cannot perform trusted writes',
       async () => {
         const providers: unknown = Reflect.getMetadata(
           'providers',
           AuthorizationModule,
         );
         assert.ok(Array.isArray(providers));
-        assert.ok(!providers.includes(AUTHORIZATION_ACCESS_V1));
+        assert.ok(
+          providers.some(
+            (p: unknown) =>
+              typeof p === 'object' &&
+              p !== null &&
+              'provide' in p &&
+              p.provide === AUTHORIZATION_ACCESS_V1,
+          ),
+        );
         assert.equal(
-          Reflect.getMetadata('controllers', AuthorizationModule),
-          undefined,
+          (Reflect.getMetadata('controllers', AuthorizationModule) as unknown[])
+            .length,
+          1,
         );
         await assert.rejects(
           new AuthorizationService(app).createRole(

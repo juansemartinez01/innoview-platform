@@ -25,12 +25,12 @@ const columns = [
   'available',
 ];
 const compact = (value: string | null) => value?.replace(/\s+/g, '');
-const identityQual =
-  "((user_identity_id)::text = NULLIF(current_setting('innoview.user_identity_id'::text, true), ''::text))";
-const directoryQual =
-  "(available AND (EXISTS ( SELECT 1 FROM memberships.membership m WHERE ((m.tenant_id = tenant_directory.tenant_id) AND ((m.status)::text = 'ACTIVE'::text) AND ((m.user_identity_id)::text = NULLIF(current_setting('innoview.user_identity_id'::text, true), ''::text))))))";
+const safeUuid = (setting: string) =>
+  `CASE WHEN (current_setting('innoview.${setting}'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.${setting}'::text, true))::uuid ELSE NULL::uuid END`;
+const identityQual = `(user_identity_id = ${safeUuid('user_identity_id')})`;
+const directoryQual = `(available AND (EXISTS ( SELECT 1 FROM memberships.membership m WHERE ((m.tenant_id = tenant_directory.tenant_id) AND ((m.status)::text = 'ACTIVE'::text) AND (m.user_identity_id = ${safeUuid('user_identity_id')})))))`;
 const tenantQual = (table: string) =>
-  `(((${table === 'tenant' ? 'id' : 'tenant_id'})::text = NULLIF(current_setting('innoview.tenant_id'::text, true), ''::text)) AND (EXISTS ( SELECT 1 FROM organizations.tenant_directory d WHERE ((d.tenant_id = ${table}.${table === 'tenant' ? 'id' : 'tenant_id'}) AND d.available))))`;
+  `((${table === 'tenant' ? 'id' : 'tenant_id'} = ${safeUuid('tenant_id')}) AND (EXISTS ( SELECT 1 FROM organizations.tenant_directory d WHERE ((d.tenant_id = ${table}.${table === 'tenant' ? 'id' : 'tenant_id'}) AND d.available))))`;
 
 const authorizationScoped = [
   'role',

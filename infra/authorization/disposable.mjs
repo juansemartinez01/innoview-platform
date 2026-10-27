@@ -12,7 +12,10 @@ const pg = createRequire(
   new URL('../../apps/api/package.json', import.meta.url),
 )('pg');
 
-export async function disposableAuthorization(operation) {
+export async function disposableAuthorization(
+  operation,
+  { schema11 = false } = {},
+) {
   if (
     !process.env.TEST_POSTGRES_PASSWORD ||
     !process.env.TEST_DB_HOST ||
@@ -57,7 +60,14 @@ export async function disposableAuthorization(operation) {
     await provisionDatabase(env);
     sources.migrator = createDataSource('migrator', env);
     await sources.migrator.initialize();
+    const allMigrations = sources.migrator.migrations;
+    if (schema11)
+      sources.migrator.migrations = allMigrations.filter(
+        (m) =>
+          Number((m.name ?? m.constructor.name).slice(-13)) <= 1793037600000,
+      );
     await sources.migrator.runMigrations();
+    sources.migrator.migrations = allMigrations;
     await provisionDatabase(env);
     for (const [kind, initialize] of Object.entries({
       app: initializeApplicationDataSource,

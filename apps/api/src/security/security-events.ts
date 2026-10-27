@@ -12,6 +12,21 @@ export type SecurityEvent =
   | 'TRUSTED_OPERATION_REPLAY'
   | 'TRUSTED_OPERATION_CONFLICT'
   | 'TRUSTED_OPERATION_CONTENTION';
+const requestTelemetry = new AsyncLocalStorage<{ deprecated: boolean }>();
+export function telemetryScope(next: () => void) {
+  requestTelemetry.run({ deprecated: false }, next);
+}
+export function deprecatedPermissionEvent() {
+  const state = requestTelemetry.getStore();
+  if (state?.deprecated) return;
+  if (state) state.deprecated = true;
+  console.info(
+    JSON.stringify({
+      event: 'DEPRECATED_PERMISSION_USED',
+      correlationId: correlation.getStore(),
+    }),
+  );
+}
 export const correlation = new AsyncLocalStorage<string>();
 export const canonicalUuid = (value: unknown): value is string =>
   typeof value === 'string' &&
@@ -47,6 +62,9 @@ export function databaseFailure(error: unknown): SecurityEvent {
         '57P02',
         '57P03',
         '53300',
+        '55P03',
+        '40001',
+        '40P01',
       ].includes(code))
   )
     return 'DATABASE_UNAVAILABLE';

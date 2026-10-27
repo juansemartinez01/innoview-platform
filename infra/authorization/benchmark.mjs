@@ -3,6 +3,13 @@ import { hostname, userInfo } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { readFile, writeFile } from 'node:fs/promises';
 import { candidateQueries, summarizePlan } from './candidates.mjs';
+import { signedFixture } from '../identity/signed-fixture.mjs';
+import { IdentityVerifier } from '../../apps/api/dist/authentication/authentication.module.js';
+import {
+  AuthorizationEvaluator,
+  AuthorizationReads,
+} from '../../apps/api/dist/authorization/access.runtime.js';
+import assert from 'node:assert/strict';
 import { disposableAuthorization } from './disposable.mjs';
 import { BENCHMARK_SEED, benchmarkTenant, seededUuid } from './dataset.mjs';
 import {
@@ -107,6 +114,19 @@ console.info(
   }),
 );
 let stage = 'initialize';
+const issuer = await signedFixture();
+const prior = {
+  OIDC_ISSUER: process.env.OIDC_ISSUER,
+  AUTH_ENV: process.env.AUTH_ENV,
+  AUTH_ALLOW_HTTP: process.env.AUTH_ALLOW_HTTP,
+};
+process.env.OIDC_ISSUER = issuer.issuer;
+process.env.AUTH_ENV = 'development';
+process.env.AUTH_ALLOW_HTTP = 'true';
+const verifier = new IdentityVerifier();
+for (const [key, value] of Object.entries(prior))
+  if (value === undefined) delete process.env[key];
+  else process.env[key] = value;
 try {
   const report = await disposableAuthorization(async ({ sources }) => {
     const start = performance.now(),
@@ -159,7 +179,7 @@ try {
       for (const identity of tenant.identities) {
         await sources.app.query(
           'INSERT INTO identity.user_identity(id,issuer,external_subject) VALUES($1,$2,$3)',
-          [identity.id, 'https://benchmark.invalid', identity.subject],
+          [identity.id, issuer.issuer, identity.subject],
         );
         const registered = await members.register(
           tenant.id,
@@ -168,6 +188,7 @@ try {
         );
         memberships.push(registered.membership.id);
       }
+      tenant.membershipIds = memberships;
       const scopes = [
         { id: tenant.groupId, type: 'GROUP' },
         ...tenant.companies.flatMap((company) => [
@@ -305,7 +326,7 @@ try {
     const comparisons = [];
     for (const tenant of [tenants[0], tenants[1]]) {
       const principal = {
-        issuer: 'https://benchmark.invalid',
+        issuer: issuer.issuer,
         subject: tenant.identities[0].subject,
         clientId: 'innoview-portal',
       };
@@ -372,7 +393,7 @@ try {
     }
     for (const tenant of [tenants[0], tenants[1]]) {
       const principal = {
-        issuer: 'https://benchmark.invalid',
+        issuer: issuer.issuer,
         subject: tenant.identities[0].subject,
         clientId: 'innoview-portal',
       };
@@ -465,6 +486,198 @@ try {
         });
       },
     );
+    stage = 'runtime-evaluator';
+    const appMembers = new MembershipsService(sources.app),
+      appOrgs = new OrganizationsService(sources.app);
+    const reads = new AuthorizationReads(sources.app, scope, appMembers),
+      evaluator = new AuthorizationEvaluator(sources.app, appMembers, appOrgs);
+    const measurements = [];
+    const percentile = (values, p) =>
+      [...values].sort((a, b) => a - b)[Math.ceil(values.length * p) - 1];
+    for (const tenant of [tenants[0], tenants[1]]) {
+      const principal = await verifier.verify(
+        await issuer.token(tenant.identities[0].subject),
+      );
+      const scopeUnit = { type: 'COMPANY', unitId: tenant.companies[0].id };
+      for (const method of ['can', 'permissionsFor', 'scopesFor']) {
+        stage = `runtime:${tenant.index}:${method}`;
+        const invoke = async () => {
+          const totalStart = performance.now();
+          let queryDuration;
+          const value = await reads.read(principal, tenant.id, async (ctx) => {
+            const q = performance.now();
+            const result =
+              method === 'can'
+                ? await evaluator.can(ctx, 'foundation.probe.read', scopeUnit)
+                : method === 'permissionsFor'
+                  ? await evaluator.permissionsFor(ctx)
+                  : await evaluator.scopesFor(ctx, 'foundation.probe.read');
+            queryDuration = performance.now() - q;
+            return result;
+          });
+          return {
+            value,
+            queryMs: queryDuration,
+            totalMs: performance.now() - totalStart,
+          };
+        };
+        const initial = await invoke();
+        for (let i = 0; i < 3; i++) await invoke();
+        const samples = [];
+        for (let i = 0; i < 30; i++) samples.push(await invoke());
+        const params = [
+          tenant.id,
+          tenant.membershipIds[0],
+          tenant.identities[0].id,
+          ...(method === 'permissionsFor' ? [] : ['foundation.probe.read']),
+          ...(method === 'can' ? ['COMPANY', scopeUnit.unitId] : []),
+        ];
+        await reads.read(principal, tenant.id, async (ctx) => {
+          const sql =
+            evaluator.queries[
+              method === 'permissionsFor'
+                ? 'permissions'
+                : method === 'scopesFor'
+                  ? 'scopes'
+                  : 'can'
+            ];
+          const [
+            {
+              'QUERY PLAN': [plan],
+            },
+          ] = await ctx.manager.query(
+            'EXPLAIN(ANALYZE,BUFFERS,FORMAT JSON) ' + sql,
+            params,
+          );
+          const details = summarizePlan(plan);
+          if (method === 'can' && tenant.index === 0)
+            assert.ok(details.indexes.includes('assignment_member_scope'));
+          plans.push({
+            tenantClass: tenant.index === 0 ? 'large' : 'small',
+            query: 'runtime:' + method,
+            sql,
+            ...details,
+          });
+          const oracle = candidateQueries(
+            tenant.id,
+            tenant.membershipIds[0],
+            scopeUnit.unitId,
+          ).find(
+            (q) =>
+              q.strategy === 'materialized' &&
+              q.name ===
+                (method === 'can'
+                  ? 'exact'
+                  : method === 'permissionsFor'
+                    ? 'permissions'
+                    : 'scopes'),
+          );
+          const expected = await ctx.manager.query(oracle.sql, oracle.params);
+          const actual = initial.value;
+          if (method === 'can')
+            assert.equal(actual.allowed, expected[0].allowed);
+          else if (method === 'permissionsFor')
+            assert.deepEqual(
+              actual,
+              expected
+                .map((p) => ({ id: p.permission_id, code: p.code }))
+                .sort((a, b) => a.code.localeCompare(b.code)),
+            );
+          else
+            assert.deepEqual(
+              actual,
+              expected
+                .map((s) => ({ type: s.scope_type, unitId: s.scope_unit_id }))
+                .sort(
+                  (a, b) =>
+                    a.type.localeCompare(b.type) ||
+                    a.unitId.localeCompare(b.unitId),
+                ),
+            );
+        });
+        measurements.push({
+          tenantClass: tenant.index === 0 ? 'large' : 'small',
+          method,
+          repetitions: 30,
+          warmup: 3,
+          initialObservation: {
+            queryMs: initial.queryMs,
+            totalMs: initial.totalMs,
+            conditions:
+              'First invocation after VACUUM/seeding and reference plans; no PostgreSQL buffer or OS cache flush. Not true cold.',
+          },
+          queryMs: {
+            p50: percentile(
+              samples.map((s) => s.queryMs),
+              0.5,
+            ),
+            p95: percentile(
+              samples.map((s) => s.queryMs),
+              0.95,
+            ),
+          },
+          transactionMs: {
+            p50: percentile(
+              samples.map((s) => s.totalMs),
+              0.5,
+            ),
+            p95: percentile(
+              samples.map((s) => s.totalMs),
+              0.95,
+            ),
+          },
+        });
+      }
+    }
+    const target = tenants[0],
+      principal = await verifier.verify(
+        await issuer.token(target.identities[0].subject),
+      );
+    const revisions = async () =>
+      sources.authorization.transaction(async (m) => {
+        await establishOperationContext(
+          m,
+          'authorization',
+          operation('versions'),
+          target.id,
+        );
+        return {
+          catalog: await m.query(
+            'SELECT revision FROM "authorization".catalog_version',
+          ),
+          tenant: await m.query(
+            'SELECT revision FROM "authorization".tenant_revision WHERE tenant_id=$1',
+            [target.id],
+          ),
+        };
+      });
+    const versionsBefore = await revisions();
+    await members.revoke(
+      target.id,
+      target.identities[0].id,
+      operation('runtime-revoke'),
+    );
+    const deniedTimes = [];
+    for (let i = 0; i < 30; i++) {
+      const start = performance.now();
+      await assert.rejects(
+        reads.read(principal, target.id, (ctx) =>
+          evaluator.can(ctx, 'foundation.probe.read', {
+            type: 'COMPANY',
+            unitId: target.companies[0].id,
+          }),
+        ),
+      );
+      deniedTimes.push(performance.now() - start);
+    }
+    assert.deepEqual(await revisions(), versionsBefore);
+    const revocation = {
+      decision: 'UNAVAILABLE_CONTEXT on next transaction',
+      rbacVersionsUnchanged: true,
+      repetitions: 30,
+      p50: percentile(deniedTimes, 0.5),
+      p95: percentile(deniedTimes, 0.95),
+    };
     const [version] = await sources.migrator.query('SELECT version()');
     stage = 'exact-counts';
     const counts = [];
@@ -563,8 +776,10 @@ try {
       roleAssignments: 50000,
       seedDurationMs: performance.now() - start,
       counts,
+      evaluatorMeasurements: measurements,
+      revocation,
       preparation:
-        'VACUUM (ANALYZE), outside transactions; all existing RLS policies unchanged',
+        'VACUUM (ANALYZE), outside transactions; schema12 indexable RLS, runtime evaluator plus frozen oracle; no OS cache flush',
       assignmentIndex:
         'Retain assignment_member_scope: measured exact-scope and small-membership index paths; no DDL or extra speculative index',
       approvedBaseline: baseline,
@@ -602,4 +817,6 @@ try {
     'Disposable benchmark failed; inspect fixture and role configuration. Sensitive details omitted.',
   );
   process.exitCode = 1;
+} finally {
+  await issuer.close();
 }

@@ -1,4 +1,5 @@
 import { verifyAuthorization } from '../authorization/authorization.spec.js';
+import { verifyAccess } from '../authorization/access.spec.js';
 import { verifyAuthorizationPreparation } from '../authorization/preparation.spec.js';
 import {
   versionOneFixture,
@@ -177,7 +178,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
                 !name.includes('OrganizationsTenantRls') &&
                 !name.includes('OrganizationOperations') &&
                 !name.includes('OperationTriggerHardening') &&
-                !name.includes('AuthorizationModel'),
+                !name.includes('AuthorizationModel') &&
+                !name.includes('IndexableIdentityTenantRls'),
             )
             .map((name) =>
               fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
@@ -234,7 +236,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
                   name.endsWith('.js') &&
                   !name.includes('OrganizationOperations') &&
                   !name.includes('OperationTriggerHardening') &&
-                  !name.includes('AuthorizationModel'),
+                  !name.includes('AuthorizationModel') &&
+                  !name.includes('IndexableIdentityTenantRls'),
               )
               .map((name) =>
                 fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
@@ -264,7 +267,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
                 (name) =>
                   name.endsWith('.js') &&
                   !name.includes('OperationTriggerHardening') &&
-                  !name.includes('AuthorizationModel'),
+                  !name.includes('AuthorizationModel') &&
+                  !name.includes('IndexableIdentityTenantRls'),
               )
               .map((name) =>
                 fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
@@ -277,7 +281,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
             await nine.destroy();
           }
           const v1 = await versionOneFixture(operator);
-          assert.equal((await migrator.runMigrations()).length, 2);
+          assert.equal((await migrator.runMigrations()).length, 3);
           await verifyVersionOneUpgrade(operator, v1);
 
           assert.equal(
@@ -322,7 +326,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               'SELECT count(*)::int AS n FROM platform_meta.migrations',
             )
           )[0].n,
-          11,
+          12,
         );
         assert.equal(await migrator.showMigrations(), false);
         const [owner] = await migrator.query<{ owner: string }[]>(
@@ -623,11 +627,13 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await verifyOperationHardening(t, migrator, env);
     await verifyAuthorization(t, app, migrator, env);
     await verifyAuthorizationPreparation(t, app, migrator, env);
+    await verifyAccess(t, app, migrator, env);
 
     await t.test(
       'real migration reverts and reapplies only in this disposable database',
       async () => {
         assert.match(database, /^innoview_test_[a-f0-9]{32}$/);
+        await migrator.undoLastMigration();
         const revertAuthorization = spawnSync(
           process.execPath,
           [

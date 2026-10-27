@@ -1,6 +1,36 @@
 # Innoview Platform
 
-Fases 0 y 1 cerradas; 2.3b aprobado con condiciones en `ee6757ee7b22346227f4f053876194342533af6d`. **2.3b.1 corrige preparación concurrente de asignaciones y mide consultas candidatas RBAC; pendiente de revisión.** No hay evaluador de permisos, Guards empresariales ni endpoints administrativos. ADR-040 y el runbook describen el contrato vigente; los apartados anteriores conservan su contexto histórico. No comenzar 2.4 sin revisión.
+Fases 0 y 1 cerradas; 2.3b.1 aprobado definitivamente en `9ab081078d9504f47ac841a7b8acdd5b44296876`. **2.4 implementa el evaluador RBAC y una demostración HTTP protegida; pendiente de revisión.** ADR-041 y el runbook describen el contrato vigente. Los apartados anteriores conservan su contexto histórico. No comenzar 2.5 sin revisión.
+
+## Evaluación efectiva — 2.4
+
+La migración aditiva 12 `IndexableIdentityTenantRls1793124000000` cambia solo los predicados app de Memberships/directorio/Organizations a igualdades UUID con CASE seguro. Mantiene roles, ACL, ENABLE/FORCE y fronteras restrictivas. No editar las once migraciones anteriores. Detener servidores y escritores para actualizar; conservar `.env`, sesiones y volúmenes:
+
+```powershell
+pnpm install --frozen-lockfile
+pnpm db:run
+pnpm db:show
+pnpm db:diagnose
+pnpm db:generate src/persistence/migrations/SchemaCheck --check
+pnpm dev
+```
+
+`authorization.access@1` tiene implementación funcional con el rol app. `AuthorizationReads` recibe únicamente un Principal emitido por el verificador OIDC, resuelve Identity existente, Membership ACTIVE y disponibilidad del tenant, y crea un contexto válido solo durante su transacción REPEATABLE READ/READ ONLY. No hay registro de identidad/membresía ni privilegios implícitos. `can` usa EXISTS puntual por scope; `permissionsFor` y `scopesFor` usan conjuntos agrupados/materializados, sin N+1. Scopes exactos, sin herencia; rol/permiso/concesiones/unidad y ancestros deben estar ACTIVE. No se cachean decisiones entre requests.
+
+Ruta técnica: `GET /authorization/demo/tenants/:tenantId/companies/:unitId`, con `Authorization: Bearer <access-token>` válido. Tenant/unit son candidatos, no autoridad. Requiere `foundation.probe.read` sobre esa COMPANY exacta; AuthenticationGuard verifica JWT y BusinessAuthorizationGuard ejecuta decisión y lectura de proyección con el mismo manager/snapshot. Solo devuelve `{id,name}`, con Cache-Control:no-store. No devuelve datos RBAC, tax_id ni otras compañías. No recibe identityId/membershipId/roles por body/query. No se agregan pantallas ni administración RBAC; Control Center permanece técnico.
+
+401 para JWT ausente/inválido; 403 sin concesión o scope autorizado; 404 uniforme para contexto no disponible/ajeno/malformado; 503/Retry-After ante indisponibilidad. Errores tienen correlationId validado/generado también en header y eventos seguros. Permission DEPRECATED niega acceso y registra como máximo un evento agregado por request, sin código/filas sensibles. La selección BFF nunca concede acceso.
+
+La demostración ALLOW/DENY está automatizada con usuarios/roles/tenants descartables y Keycloak real en `pnpm test`. No se crean administradores ni permisos para usuarios habituales de desarrollo. Para reproducir mediciones separadas de CI ordinaria:
+
+```powershell
+docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
+pnpm authorization:rls:benchmark
+pnpm authorization:benchmark
+docker compose -f compose.test.yaml down
+```
+
+El primer comando compara schema 11→12 sobre 20.000 membresías; el segundo ejecuta el evaluador definitivo sobre 500 tenants / 50.000 asignaciones, conserva el oráculo SQL anterior y registra planes/p50/p95. Artefactos en infra/authorization; metodología y límites en [runbook](docs/OPERATIONS_RUNBOOK.md). Las condiciones iniciales son después de carga/VACUUM, no una caché OS fría; no hay SLA productivo. Pendientes 2.5: D-5/huellas históricas, A-2, reparación de directorio, instalación desde cero y pruebas adversariales integrales.
 
 ## Preparación del evaluador — 2.3b.1
 

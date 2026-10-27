@@ -29,6 +29,25 @@ function text(value: string, max: number): string {
 @Injectable()
 export class MembershipsService {
   constructor(@Inject(DataSource) private readonly source: DataSource) {}
+  // Native transactional read contract; owner keeps SQL and active semantics.
+  authorizationMembershipSql() {
+    return "SELECT id,tenant_id FROM memberships.membership WHERE tenant_id=$1 AND id=$2 AND user_identity_id=$3 AND status='ACTIVE'";
+  }
+  async authorizationMembership(
+    tenantId: string,
+    identityId: string,
+    manager: EntityManager,
+  ) {
+    if (
+      manager.connection !== this.source ||
+      !manager.queryRunner?.isTransactionActive
+    )
+      throw new Error('Active local transaction required');
+    return manager.getRepository(Membership).findOne({
+      select: { id: true },
+      where: { tenantId, userIdentityId: identityId, status: 'ACTIVE' },
+    });
+  }
 
   async activeTenantReferences(
     userIdentityId: string,

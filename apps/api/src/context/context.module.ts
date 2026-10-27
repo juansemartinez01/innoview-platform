@@ -52,6 +52,7 @@ export class TenantReadTransactions {
     operation: (
       manager: EntityManager,
       option: ContextOption,
+      identityId: string,
     ) => Promise<T> | T,
   ): Promise<T> {
     if (
@@ -75,7 +76,7 @@ export class TenantReadTransactions {
         await manager.query("SELECT set_config('innoview.tenant_id',$1,true)", [
           option.id,
         ]);
-        return { value: await operation(manager, option) };
+        return { value: await operation(manager, option, identityId) };
       },
     );
     if (!result) throw new NotFoundException('Context unavailable');

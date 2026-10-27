@@ -324,7 +324,13 @@ export async function verifyContext(t, h) {
           const response = await api('/context/validate', payload.access, {
             tenantId: id,
           });
-          statuses.push(await collect(response));
+          const body = await collect(response);
+          assert.equal(
+            body.correlationId,
+            response.headers.get('x-correlation-id'),
+          );
+          delete body.correlationId;
+          statuses.push(body);
           assert.equal(response.status, 404);
           assert.equal((await select(id, current.revision)).status, 404);
         }

@@ -1,0 +1,420 @@
+{
+  "postgres": "PostgreSQL 18.6 (Debian 18.6-1.pgdg12+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit",
+  "seed": "innoview-authorization-20261026-v1",
+  "memberships": 20000,
+  "upgrade": "11 -> 12, transactional, revert/reapply disposable only",
+  "before": {
+    "results": [
+      {
+        "identity": "d4b9699d-b7fb-489c-8f51-a083d3150835",
+        "rows": [
+          {
+            "user_identity_id": "d4b9699d-b7fb-489c-8f51-a083d3150835"
+          }
+        ],
+        "directory": [
+          {
+            "tenant_id": "4c3ae403-ff78-47f3-91dc-56ab0ad3c930"
+          }
+        ],
+        "companies": [
+          {
+            "id": "6961a7b8-9a73-49a7-a0c2-8945d5c2dd7f"
+          }
+        ]
+      },
+      {
+        "identity": "6e2ab88a-38bd-41c6-8f0b-f59161eb51f3",
+        "rows": [
+          {
+            "user_identity_id": "6e2ab88a-38bd-41c6-8f0b-f59161eb51f3"
+          }
+        ],
+        "directory": [
+          {
+            "tenant_id": "4c3ae403-ff78-47f3-91dc-56ab0ad3c930"
+          }
+        ],
+        "companies": [
+          {
+            "id": "6961a7b8-9a73-49a7-a0c2-8945d5c2dd7f"
+          }
+        ]
+      },
+      {
+        "identity": "2bb7e933-8e89-4735-88b7-877c75a5af64",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      },
+      {
+        "identity": "",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      },
+      {
+        "identity": "invalid",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      },
+      {
+        "identity": "d4b9699d-b7fb-489c-8f51-a083d3150835\n",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      },
+      {
+        "identity": "d4b9699d-b7fb-489c-8f51-a083d3150835 ",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      },
+      {
+        "identity": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      }
+    ],
+    "plan": {
+      "executionMs": 3.499,
+      "planningMs": 0.078,
+      "actualRows": 1,
+      "sharedHits": 267,
+      "sharedReads": 0,
+      "indexes": [],
+      "rlsWork": [
+        {
+          "relation": "membership",
+          "loops": 1,
+          "actualRows": 1,
+          "sharedHits": 267,
+          "sharedReads": 0,
+          "actualTotalMs": 3.485
+        }
+      ],
+      "nodes": [
+        {
+          "type": "Seq Scan",
+          "relation": "membership",
+          "alias": "membership",
+          "estimatedRows": 100,
+          "actualRows": 1,
+          "loops": 1,
+          "sharedHits": 267,
+          "sharedReads": 0,
+          "filter": "(((status)::text = 'ACTIVE'::text) AND ((user_identity_id)::text = NULLIF(current_setting('innoview.user_identity_id'::text, true), ''::text)))",
+          "rowsRemovedByFilter": 19999,
+          "actualTotalMs": 3.485,
+          "totalCost": 767
+        }
+      ],
+      "raw": {
+        "Plan": {
+          "Node Type": "Seq Scan",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Relation Name": "membership",
+          "Alias": "membership",
+          "Startup Cost": 0,
+          "Total Cost": 767,
+          "Plan Rows": 100,
+          "Plan Width": 16,
+          "Actual Startup Time": 0.008,
+          "Actual Total Time": 3.485,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Disabled": false,
+          "Filter": "(((status)::text = 'ACTIVE'::text) AND ((user_identity_id)::text = NULLIF(current_setting('innoview.user_identity_id'::text, true), ''::text)))",
+          "Rows Removed by Filter": 19999,
+          "Shared Hit Blocks": 267,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning": {
+          "Shared Hit Blocks": 3,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.078,
+        "Triggers": [],
+        "Execution Time": 3.499
+      }
+    }
+  },
+  "after": {
+    "results": [
+      {
+        "identity": "d4b9699d-b7fb-489c-8f51-a083d3150835",
+        "rows": [
+          {
+            "user_identity_id": "d4b9699d-b7fb-489c-8f51-a083d3150835"
+          }
+        ],
+        "directory": [
+          {
+            "tenant_id": "4c3ae403-ff78-47f3-91dc-56ab0ad3c930"
+          }
+        ],
+        "companies": [
+          {
+            "id": "6961a7b8-9a73-49a7-a0c2-8945d5c2dd7f"
+          }
+        ]
+      },
+      {
+        "identity": "6e2ab88a-38bd-41c6-8f0b-f59161eb51f3",
+        "rows": [
+          {
+            "user_identity_id": "6e2ab88a-38bd-41c6-8f0b-f59161eb51f3"
+          }
+        ],
+        "directory": [
+          {
+            "tenant_id": "4c3ae403-ff78-47f3-91dc-56ab0ad3c930"
+          }
+        ],
+        "companies": [
+          {
+            "id": "6961a7b8-9a73-49a7-a0c2-8945d5c2dd7f"
+          }
+        ]
+      },
+      {
+        "identity": "2bb7e933-8e89-4735-88b7-877c75a5af64",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      },
+      {
+        "identity": "",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      },
+      {
+        "identity": "invalid",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      },
+      {
+        "identity": "d4b9699d-b7fb-489c-8f51-a083d3150835\n",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      },
+      {
+        "identity": "d4b9699d-b7fb-489c-8f51-a083d3150835 ",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      },
+      {
+        "identity": "AAAAAAAA-AAAA-AAAA-AAAA-AAAAAAAAAAAA",
+        "rows": [],
+        "directory": [],
+        "companies": []
+      }
+    ],
+    "plan": {
+      "executionMs": 0.038,
+      "planningMs": 0.053,
+      "actualRows": 1,
+      "sharedHits": 3,
+      "sharedReads": 0,
+      "indexes": ["ix_membership_identity_status"],
+      "rlsWork": [
+        {
+          "relation": "membership",
+          "loops": 1,
+          "actualRows": 1,
+          "sharedHits": 3,
+          "sharedReads": 0,
+          "actualTotalMs": 0.017
+        }
+      ],
+      "nodes": [
+        {
+          "type": "Index Scan",
+          "relation": "membership",
+          "alias": "membership",
+          "index": "ix_membership_identity_status",
+          "estimatedRows": 1,
+          "actualRows": 1,
+          "loops": 1,
+          "sharedHits": 3,
+          "sharedReads": 0,
+          "indexCond": "((user_identity_id = CASE WHEN (current_setting('innoview.user_identity_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.user_identity_id'::text, true))::uuid ELSE NULL::uuid END) AND ((status)::text = 'ACTIVE'::text))",
+          "rowsRemovedByIndexRecheck": 0,
+          "actualTotalMs": 0.017,
+          "totalCost": 8.32
+        }
+      ],
+      "raw": {
+        "Plan": {
+          "Node Type": "Index Scan",
+          "Parallel Aware": false,
+          "Async Capable": false,
+          "Scan Direction": "Forward",
+          "Index Name": "ix_membership_identity_status",
+          "Relation Name": "membership",
+          "Alias": "membership",
+          "Startup Cost": 0.3,
+          "Total Cost": 8.32,
+          "Plan Rows": 1,
+          "Plan Width": 16,
+          "Actual Startup Time": 0.017,
+          "Actual Total Time": 0.017,
+          "Actual Rows": 1,
+          "Actual Loops": 1,
+          "Disabled": false,
+          "Index Cond": "((user_identity_id = CASE WHEN (current_setting('innoview.user_identity_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.user_identity_id'::text, true))::uuid ELSE NULL::uuid END) AND ((status)::text = 'ACTIVE'::text))",
+          "Rows Removed by Index Recheck": 0,
+          "Index Searches": 1,
+          "Shared Hit Blocks": 3,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning": {
+          "Shared Hit Blocks": 0,
+          "Shared Read Blocks": 0,
+          "Shared Dirtied Blocks": 0,
+          "Shared Written Blocks": 0,
+          "Local Hit Blocks": 0,
+          "Local Read Blocks": 0,
+          "Local Dirtied Blocks": 0,
+          "Local Written Blocks": 0,
+          "Temp Read Blocks": 0,
+          "Temp Written Blocks": 0
+        },
+        "Planning Time": 0.053,
+        "Triggers": [],
+        "Execution Time": 0.038
+      }
+    }
+  },
+  "policies": [
+    {
+      "schemaname": "memberships",
+      "tablename": "membership",
+      "policyname": "membership_app_boundary",
+      "qual": "(user_identity_id =\nCASE\n    WHEN (current_setting('innoview.user_identity_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.user_identity_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND)",
+      "permissive": "RESTRICTIVE"
+    },
+    {
+      "schemaname": "memberships",
+      "tablename": "membership",
+      "policyname": "membership_app_select",
+      "qual": "(user_identity_id =\nCASE\n    WHEN (current_setting('innoview.user_identity_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.user_identity_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND)",
+      "permissive": "PERMISSIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "branch",
+      "policyname": "app_boundary",
+      "qual": "((tenant_id =\nCASE\n    WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND) AND (EXISTS ( SELECT 1\n   FROM organizations.tenant_directory d\n  WHERE ((d.tenant_id = branch.tenant_id) AND d.available))))",
+      "permissive": "RESTRICTIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "branch",
+      "policyname": "app_select",
+      "qual": "((tenant_id =\nCASE\n    WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND) AND (EXISTS ( SELECT 1\n   FROM organizations.tenant_directory d\n  WHERE ((d.tenant_id = branch.tenant_id) AND d.available))))",
+      "permissive": "PERMISSIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "business_group",
+      "policyname": "app_boundary",
+      "qual": "((tenant_id =\nCASE\n    WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND) AND (EXISTS ( SELECT 1\n   FROM organizations.tenant_directory d\n  WHERE ((d.tenant_id = business_group.tenant_id) AND d.available))))",
+      "permissive": "RESTRICTIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "business_group",
+      "policyname": "app_select",
+      "qual": "((tenant_id =\nCASE\n    WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND) AND (EXISTS ( SELECT 1\n   FROM organizations.tenant_directory d\n  WHERE ((d.tenant_id = business_group.tenant_id) AND d.available))))",
+      "permissive": "PERMISSIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "company",
+      "policyname": "app_boundary",
+      "qual": "((tenant_id =\nCASE\n    WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND) AND (EXISTS ( SELECT 1\n   FROM organizations.tenant_directory d\n  WHERE ((d.tenant_id = company.tenant_id) AND d.available))))",
+      "permissive": "RESTRICTIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "company",
+      "policyname": "app_select",
+      "qual": "((tenant_id =\nCASE\n    WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND) AND (EXISTS ( SELECT 1\n   FROM organizations.tenant_directory d\n  WHERE ((d.tenant_id = company.tenant_id) AND d.available))))",
+      "permissive": "PERMISSIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "organizational_unit",
+      "policyname": "app_boundary",
+      "qual": "((tenant_id =\nCASE\n    WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND) AND (EXISTS ( SELECT 1\n   FROM organizations.tenant_directory d\n  WHERE ((d.tenant_id = organizational_unit.tenant_id) AND d.available))))",
+      "permissive": "RESTRICTIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "organizational_unit",
+      "policyname": "app_select",
+      "qual": "((tenant_id =\nCASE\n    WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND) AND (EXISTS ( SELECT 1\n   FROM organizations.tenant_directory d\n  WHERE ((d.tenant_id = organizational_unit.tenant_id) AND d.available))))",
+      "permissive": "PERMISSIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "tenant",
+      "policyname": "app_boundary",
+      "qual": "((id =\nCASE\n    WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND) AND (EXISTS ( SELECT 1\n   FROM organizations.tenant_directory d\n  WHERE ((d.tenant_id = tenant.id) AND d.available))))",
+      "permissive": "RESTRICTIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "tenant",
+      "policyname": "app_select",
+      "qual": "((id =\nCASE\n    WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid\n    ELSE NULL::uuid\nEND) AND (EXISTS ( SELECT 1\n   FROM organizations.tenant_directory d\n  WHERE ((d.tenant_id = tenant.id) AND d.available))))",
+      "permissive": "PERMISSIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "tenant_directory",
+      "policyname": "app_boundary",
+      "qual": "(available AND (EXISTS ( SELECT 1\n   FROM memberships.membership m\n  WHERE ((m.tenant_id = tenant_directory.tenant_id) AND ((m.status)::text = 'ACTIVE'::text) AND (m.user_identity_id =\n        CASE\n            WHEN (current_setting('innoview.user_identity_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.user_identity_id'::text, true))::uuid\n            ELSE NULL::uuid\n        END)))))",
+      "permissive": "RESTRICTIVE"
+    },
+    {
+      "schemaname": "organizations",
+      "tablename": "tenant_directory",
+      "policyname": "app_select",
+      "qual": "(available AND (EXISTS ( SELECT 1\n   FROM memberships.membership m\n  WHERE ((m.tenant_id = tenant_directory.tenant_id) AND ((m.status)::text = 'ACTIVE'::text) AND (m.user_identity_id =\n        CASE\n            WHEN (current_setting('innoview.user_identity_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.user_identity_id'::text, true))::uuid\n            ELSE NULL::uuid\n        END)))))",
+      "permissive": "PERMISSIVE"
+    }
+  ]
+}

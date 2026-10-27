@@ -1,4 +1,72 @@
-# Operaciones técnicas y diagnóstico — contrato vigente 2.3b.1
+# Operaciones técnicas y diagnóstico — contrato vigente 2.4
+
+## 2.4 — evaluador efectivo y demostración protegida
+
+Base aprobada 9ab0810, ADR-041. Detener API/BFF y escritores para actualizar código/políticas, preservar `.env`, sesiones y volúmenes. No nuevas credenciales/servicios/dependencias. No crear permisos para usuarios habituales ni un administrador empresarial. Entorno local sigue Node 24/PostgreSQL 18/Keycloak existentes.
+
+```powershell
+pnpm install --frozen-lockfile
+docker compose up -d --wait --wait-timeout 240
+pnpm db:run
+pnpm db:show
+pnpm db:diagnose
+pnpm db:generate src/persistence/migrations/SchemaCheck --check
+pnpm dev
+```
+
+E-1 migra 11→12 mediante ALTER POLICY transaccional sobre 14políticas app, sin reescribir migraciones. UUID contra CASE seguro; no cast de columna UUID a texto. Roles/ACL/defaults/ENABLE/FORCE/RESTRICTIVE se mantienen, sin tocar políticas operativas ni tablas/sesiones. Aplicar coordinadamente con nuevos diagnósticos; una versión vieja de diagnóstico detectaría el contrato SQL nuevo como drift. No arreglarlo deshabilitando RLS ni cambiando privilegios. No revertir en bases habituales; el down existe para el ciclo descartable de pruebas.
+
+### Ruta y contrato HTTP
+
+GET `/authorization/demo/tenants/:tenantId/companies/:unitId`, Bearer access token del issuer Keycloak aprobado. Permission fijo `foundation.probe.read`, scope COMPANY exacto. Un UUID seleccionado en Portal es candidato, nunca prueba de acceso. La API resuelve Identity existente y Membership ACTIVE sin altas implícitas; verifica tenant/grupo, rol/asociaciones/permiso, unidad y ancestros ACTIVE. Solo `{id,name}` sale al cliente, sin tax_id, lista de otros scopes ni datos RBAC. Cache-Control:no-store. No se agrega selector/administración a Control Center ni endpoints para asignar roles.
+
+AuthenticationGuard emite Principal verificado; AuthorizationReads crea contexto privado acotado al callback. BusinessAuthorizationGuard hace can y llama al contrato de proyección Organizations con el **mismo manager RR/read-only**; el controller devuelve exclusivamente ese DTO ya autorizado. No devolver contexto/manager ni hacer la lectura en otra conexión después de ALLOW. Para nuevas rutas, mantener autorización+lectura/efecto en la misma transacción o reevaluar en la transacción que operará. No crear un UoW genérico para extender la demostración.
+
+401 JWT ausente/inválido;403 falta de concesión/scope en contexto válido;404 uniforme para contexto/tenant no disponible, ajeno o malformado;503+Retry-After:1 ante indisponibilidad/contención. Un scope ajeno/no existente en tenant válido devuelve la misma denegación403. El error incluye correlationId igual al X-Correlation-Id validado/generado; eventos estructurados no contienen código de permiso, tokens, SQL ni trazas. UNKNOWN_PERMISSION queda interno; DEPRECATED niega y emite a lo sumo un evento agregado por request. No convertir resultados vacíos normales en incidentes.
+
+Demostración automatizada: usuario A con Membership/Role/Permission/scope válidos → 200 y proyección mínima ; B con Membership pero sin permiso → 403 ; C de otro tenant → 404, igual que tenant desconocido. Pruebas Keycloak/Nest reales verifican JWT inválido 401, estados y deprecación, revocación y bloqueo SQL real 503/Retry-After. `pnpm test` conserva OIDC/login/logout/refresh, aislamiento de secretos API/BFF, selector y Chromium. Todo en bases/usuarios/roles descartables, sin modificar los usuarios de desarrollo. No existe CLI de concesiones públicas ni seed productivo para habilitar el demo.
+
+### Benchmark E-1 y evaluador definitivo
+
+```powershell
+docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
+pnpm authorization:rls:benchmark
+pnpm authorization:benchmark
+docker compose -f compose.test.yaml down
+```
+
+El primero crea schema 11 poblado con 20.000 identidades/membresías y verifica migración 12, misma visibilidad/denegación, ausencia de columnas UUID::text, contexto vacío/inválido/whitespace, diagnóstico, revert/reapply descartable e índice ix_membership_identity_status sin hints. Artefacto `infra/authorization/rls-benchmark-result.json` con planes antes/después completos. Predicción declarada antes: scan/filter en v11; acceso UUID indexado en v12 bajo carga, sin exigir ese índice para tablas pequeñas.
+
+El segundo conserva 500 tenants / 50.000 asignaciones, distribución/semilla aprobadas y conteos exactos. Agrega métodos definitivos de AuthorizationEvaluator con contextos de AuthorizationReads app-only y Principal verificado criptográficamente contra JWKS descartable (no marcador fabricado ni bypassRLS). Las pruebas HTTP usan Keycloak real. SQL previo de ADR-040 queda como oráculo congelado; se comparan conjuntos completos ordenados, no solo cardinalidad. Se obtienen EXPLAIN de los SQL definitivos, ancestros y RLS anidada, con condiciones/filtros/filas descartadas/estimaciones/loops/buffers/heap fetches y tamaños de índices. can exige evidencia assignment_member_scope bajo la carga grande, sin materializar la Membership entera.
+
+Metodología: primera observación reproducible después de base creada/cargada, VACUUM y planes de referencia; no es frío real y no se vació caché PostgreSQL/OS. Luego 3 warmups y30 repeticiones por método, separando p50/p95 del método (incluye validación runtime del contexto y SQL agrupado) de la transacción completa (resolución Identity/Membership/disponibilidad/GUC y commit). JWT/JWKS se verifican antes de medir; no es latencia HTTP de login. No SLA ni umbral temporal de CI. Variaciones de buffers, muestreo, SO y host compartido impiden comparaciones temporales ingenuas con otra preparación/consulta.
+
+Revocación benchmark: 30nuevas transacciones después de revocar Membership deben negar aun con catalog_version/tenant_revision idénticos; historial se conserva. Se registran p50/p95 de esa denegación y versiones sin cambios. Una transacción ya iniciada puede mantener su snapshot: no confundir eso con caché de decisiones. No Redis/cachés entre requests ni lecturas de evaluación mediante operadores. El benchmark pesado sigue separado de CI ordinaria.
+
+### Límites y deuda hacia 2.5
+
+RLS continúa aislando identidad/tenant; las políticas SQL no implementan RBAC por compañía para todo SELECT arbitrario del rol app. Guards y operaciones transaccionales son obligatorios para cada futura API empresarial. GUC no autentica a quien ya puede ejecutar SQL arbitrario con la misma conexión. Mantener consultas parametrizadas, credenciales separadas y timeouts actuales.
+
+D-5: responsable del módulo Authorization/Platform Core, supervisión Director/Auditor, objetivo incremento 2.5 **antes del cierre de Fase 2**, compatibilidad de huellas históricas antes de cambiar CURRENT_FINGERPRINT_VERSION. Mantener A-2/operador Organizations amplio, reparación auditada de tenant_directory, instalación desde cero y pruebas adversariales integrales en 2.5. N-1 cerrado; N-3 convención CHECK/FK existentes NOT VALID + VALIDATE cuando corresponda, nunca PK/UNIQUE. Advertencia conocida TypeORM/pg preservada. No comenzar 2.5 sin revisión.
+
+### Resultados locales 2.4 (artefactos finales)
+
+E-1: antes Seq Scan, 267 shared hits, 19.999 filas descartadas; después ix_membership_identity_status, 3 shared hits, 1 fila visible idéntica. No hints ni cambio de permisos. La latencia no se usa como criterio de aceptación.
+
+| Tenant / método        | Método p50 / p95 ms | Transacción p50 / p95 ms |
+| ---------------------- | ------------------- | ------------------------ |
+| large / can            | 4,460 / 5,398       | 11,777 / 14,652          |
+| large / permissionsFor | 7,773 / 8,626       | 14,319 / 16,261          |
+| large / scopesFor      | 6,681 / 7,510       | 14,393 / 15,805          |
+| small / can            | 4,299 / 4,859       | 10,858 / 12,010          |
+| small / permissionsFor | 4,601 / 5,755       | 10,955 / 15,867          |
+| small / scopesFor      | 4,564 / 5,360       | 11,284 / 13,507          |
+
+Revocación: DENY por contexto no disponible en la siguiente transacción, con versiones RBAC sin cambios; p50 3,862 / p95 5,325 ms. can exacto utiliza assignment_member_scope en ambos tamaños. Planes finales grandes: runtime:can: 91 hits; runtime:permissionsFor: 2059 hits; runtime:scopesFor: 2060 hits.
+
+Pruebas locales: **147 resultados aprobados (100 PostgreSQL + 47 OIDC/HTTP/runtime/Chromium, incluidos agrupadores)**, sin omisiones/cancelaciones. Doce migraciones aplicadas, generate --check sin diferencias, diagnóstico sin hallazgos/divergencias. La advertencia conocida TypeORM/pg de introspección permanece. Verificar GitHub Actions sobre el SHA publicado antes de aceptar; no se declara cerrada Fase 2.
+
+Los apartados siguientes conservan antecedentes históricos; el contrato actual es 2.4/ADR-041.
 
 ## Addendum 2.3b.1 — replay, pools y evidencia RBAC
 

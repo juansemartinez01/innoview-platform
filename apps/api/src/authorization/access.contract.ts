@@ -29,5 +29,6 @@ export interface AuthorizationAccessV1 {
     permission: string,
   ): Promise<Scope[]>;
 }
-// Contract only: no provider/evaluator is registered in 2.3b.
+// Runtime provider registered in 2.4. Contexts are issued only for the current
+// authenticated read transaction; copying public fields conveys no authority.
 export const AUTHORIZATION_ACCESS_V1 = Symbol('authorization.access@1');

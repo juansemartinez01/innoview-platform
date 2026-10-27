@@ -18,6 +18,12 @@ export interface Principal {
   subject: string;
   clientId: string;
 }
+const verifiedPrincipals = new WeakSet<object>();
+export function isVerifiedPrincipal(value: unknown): value is Principal {
+  return (
+    typeof value === 'object' && value !== null && verifiedPrincipals.has(value)
+  );
+}
 export interface IdentityRequest {
   headers: { authorization?: string };
   identity?: Principal;
@@ -66,11 +72,13 @@ export class IdentityVerifier {
       !['innoview-portal', 'innoview-control-center'].includes(payload.azp)
     )
       throw new Error('Invalid access token');
-    return {
+    const principal = {
       issuer: payload.iss!,
       subject: payload.sub,
       clientId: payload.azp,
     };
+    verifiedPrincipals.add(principal);
+    return principal;
   }
 }
 
