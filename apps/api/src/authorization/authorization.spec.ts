@@ -221,7 +221,7 @@ export async function verifyAuthorization(
           .getRepository(CatalogVersion)
           .findOneByOrFail({ singleton: true });
         assert.equal(typeof before.revision, 'string');
-        assert.equal(before.revision, '2');
+        assert.equal(before.revision, '7');
         const extra = 'a0000000-0000-4000-8000-000000000003';
         await migrator.query(
           "INSERT INTO \"authorization\".permission(id,code,owner_module,description) VALUES($1,'foundation.probe.inspect','foundation','Technical catalog fixture')",
@@ -1000,7 +1000,7 @@ export async function verifyAuthorization(
         assert.equal(
           (Reflect.getMetadata('controllers', AuthorizationModule) as unknown[])
             .length,
-          1,
+          2,
         );
         await assert.rejects(
           new AuthorizationService(app).createRole(

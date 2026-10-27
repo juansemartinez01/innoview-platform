@@ -1,7 +1,13 @@
 import policy from '../../apps/api/src/runtime-environment.policy.json' with { type: 'json' };
 export function technicalEnvironment(purpose, input, system = process.env) {
   if (
-    !['backup', 'directory', 'diagnose', 'provision-tenant'].includes(purpose)
+    ![
+      'backup',
+      'directory',
+      'diagnose',
+      'provision-tenant',
+      'authorization-bootstrap',
+    ].includes(purpose)
   )
     throw new Error('Unknown technical process');
   const kind =
@@ -33,5 +39,14 @@ export function technicalEnvironment(purpose, input, system = process.env) {
     purpose === 'backup' ? 'PLATFORM_POSTGRES_PASSWORD' : `DB_${kind}_PASSWORD`,
   ])
     if (input[key] !== undefined) env[key] = input[key];
+  if (purpose === 'authorization-bootstrap') {
+    delete env.DB_ORGANIZATIONS_PROVISIONER_USER;
+    delete env.DB_ORGANIZATIONS_PROVISIONER_PASSWORD;
+    for (const owner of ['AUTHORIZATION', 'MEMBERSHIP', 'ORGANIZATIONS'])
+      for (const suffix of ['USER', 'PASSWORD']) {
+        const key = `DB_${owner}_${suffix}`;
+        if (input[key] !== undefined) env[key] = input[key];
+      }
+  }
   return env;
 }

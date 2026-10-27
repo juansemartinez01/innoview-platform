@@ -153,6 +153,22 @@ export class AuthorizationService {
         'READ COMMITTED',
         async (manager) => {
           await this.operationContext(manager, tenantId, op);
+          const [historicalTenant] = await manager.query<
+            { tenant_id: string }[]
+          >(
+            'SELECT tenant_id FROM "authorization".operation WHERE request_id=$1',
+            [op.requestId],
+          );
+          if (historicalTenant && historicalTenant.tenant_id !== tenantId)
+            throw new AuthorizationOperationError('REQUEST_ID_CONFLICT');
+          await manager.query(
+            'INSERT INTO "authorization".tenant_revision(tenant_id) VALUES($1) ON CONFLICT(tenant_id) DO NOTHING',
+            [tenantId],
+          );
+          await manager.query(
+            'SELECT revision FROM "authorization".tenant_revision WHERE tenant_id=$1 FOR UPDATE',
+            [tenantId],
+          );
           const inserted = await manager.query<{ request_id: string }[]>(
             `INSERT INTO "authorization".operation(request_id,tenant_id,operation_type,fingerprint,fingerprint_version,actor,actor_type,reason,technical_source)
           VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(request_id) DO NOTHING RETURNING request_id`,
@@ -182,14 +198,6 @@ export class AuthorizationService {
             return old.result;
           }
           if (preparationFailed) throw preparationError;
-          await manager.query(
-            'INSERT INTO "authorization".tenant_revision(tenant_id) VALUES($1) ON CONFLICT(tenant_id) DO NOTHING',
-            [tenantId],
-          );
-          await manager.query(
-            'SELECT revision FROM "authorization".tenant_revision WHERE tenant_id=$1 FOR UPDATE',
-            [tenantId],
-          );
           const value = await action(manager);
           const [stored] = await manager.query<[{ result: T }[], number]>(
             'UPDATE "authorization".operation SET result=$3::jsonb,completed_at=clock_timestamp() WHERE tenant_id=$1 AND request_id=$2 RETURNING result',
@@ -307,7 +315,13 @@ export class AuthorizationService {
     roleId: string,
     scope: Scope,
     operation: TechnicalOperation,
+    operationType: 'ASSIGN' | 'GRANT_TENANT_ADMIN' = 'ASSIGN',
   ) {
+    if (
+      operationType === 'GRANT_TENANT_ADMIN' &&
+      operation.actorType !== 'INNOVIEW_OPERATOR'
+    )
+      throw new AuthorizationOperationError('OPERATOR_REQUIRED');
     tenantId = uuid(tenantId);
     membershipId = uuid(membershipId);
     roleId = uuid(roleId);
@@ -317,7 +331,7 @@ export class AuthorizationService {
       throw new AuthorizationOperationError('INVALID_SCOPE');
     return this.write(
       tenantId,
-      'ASSIGN',
+      operationType,
       { tenantId, membershipId, roleId, scope: { type, unitId } },
       operation,
       async (manager) => {

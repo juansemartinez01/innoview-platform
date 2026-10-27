@@ -1,3 +1,4 @@
+import { containmentBenchmark } from './delegation-benchmark.mjs';
 import { createHash } from 'node:crypto';
 import { hostname, userInfo } from 'node:os';
 import { performance } from 'node:perf_hooks';
@@ -105,8 +106,11 @@ const permissionIds = Array.from({ length: width }, (_, i) =>
     ? `a0000000-0000-4000-8000-00000000000${i + 1}`
     : seededUuid('permission-width:' + i),
 );
-const artifact =
-  width === 2 ? 'benchmark-result.json' : 'benchmark-wide-result.json';
+const artifact = process.argv.includes('--delegation-only')
+  ? 'delegation-benchmark-result.json'
+  : width === 2
+    ? 'benchmark-result.json'
+    : 'benchmark-wide-result.json';
 const expectations = {
   grants:
     'Tenant/member index access; inline queries may repeat nested membership/directory checks. Materialized grants should bound role/RP checks to tenant roles, not assignments. DISTINCT permissions/scopes remove fanout. No full cross-tenant assignment scan.',
@@ -510,6 +514,8 @@ try {
         });
       },
     );
+    if (process.argv.includes('--delegation-only'))
+      return containmentBenchmark(sources, tenants[0], width);
     stage = 'runtime-evaluator';
     const appMembers = new MembershipsService(sources.app),
       appOrgs = new OrganizationsService(sources.app);

@@ -1,45 +1,95 @@
 # ADR resumidas — decisiones acordadas
 
+## ADR-043 — Asignación delegada contenida y procedencia humana (3.1)
+
+- Fase 2 cerrada oficialmente sobre `753def7f665ca979af21a799ad72d52fde7c1ad9`. Solo 3.1: POST /admin/role-assignments asigna un rol existente; sin composición, invitaciones, revocación HTTP ni UI administrativa. Contrato, matriz, bootstrap y riesgos: [DELEGATION_3_1.md](DELEGATION_3_1.md).
+- Opción C: pool/Nest token authorization.delegation-source y credencial authorization_delegation independientes, solo en API. DataSource app, IdentityReadTransactions, AuthorizationReads y authorization.access@1 conservan su comportamiento. Sin SET ROLE, broker, SECURITY DEFINER, BYPASSRLS ni credencial global en HTTP/BFF.
+- Excepción nativa de lectura controlada: Identity, Memberships y Organizations exponen sus relaciones concretas en la misma transacción delegada, con columnas mínimas y RLS específicas. Identity agrega RLS preservando app; delegado solo issuer/sub LOCAL exactos. Membership actor y destino distintos; Organizations comprueba disponibilidad de jerarquía fija. No habilita SQL privado general para módulos comerciales. Migración congela SQL/ACL de esa versión.
+- Migración 15: campos humanos en ledger/eventos y FK compuesta tenant/Membership/Identity, con UNIQUE propietaria en Memberships. CHECK/FK poblados NOT VALID+VALIDATE; historia sin reatribuir. delegatedOperation distinto de technicalOperation. Auditoría deriva campos humanos del pending ledger; campos técnicos NULL. Cinco códigos authorization.* migrator-only, sin concesiones automáticas.
+- require_delegated_authority SECURITY INVOKER: BEFORE INSERT y constraint trigger diferido. assignment.grant efectivo y permisos ACTIVE del destino contenidos en permisos efectivos del actor, en scope exacto. Ninguna referencia histórica del destino a authorization.*. Sin herencia. ACL excluye UPDATE delegado de asignaciones y escritura Role/RolePermission/catálogo.
+- Escritores READ COMMITTED: contexto LOCAL, lock_timeout 8 s, revisión por tenant FOR UPDATE antes de ledger/DML. Técnico inicializa a cero explícitamente; delegado falla si falta. Solo el técnico puede leer la operación completada del request LOCAL fuera del tenant candidato para preservar conflicto global; app/delegado y todas las escrituras conservan frontera. Pending/data/audit/revisión/result atómicos; replay usa versión persistida v2 con tenant/actor/argumentos. Replay delegado exige autoridad vigente; perderla no permite reejecución ni exposición histórica.
+- FK operation→Tenant DEFERRABLE INITIALLY IMMEDIATE; solo delegado la difiere para no retener KEY SHARE preventivo que impediría cambios propietarios durante pending ledger. FK efectiva al commit. No locks escritores explícitos sobre otros módulos. Revalidación diferida no elimina revocaciones posteriores a su última lectura; operaciones posteriores siempre reevalúan. Cambios RBAC técnicos/delegados se serializan por revisión, no globalmente.
+- Bootstrap GRANT_TENANT_ADMIN solo CLI técnica Authorization/INNOVIEW_OPERATOR, referencias/request/actor/motivo explícitos. Rol preparado mediante contratos técnicos auditados; lecturas propietarias con pools independientes fuera de HTTP. guard_operation rechaza USER_IDENTITY técnico y bootstrap delegado. No administración automática por login/Membership.
+- H-2: contención al INSERT/commit no es eterna ante cambios técnicos de roles compartidos. Innoview gobierna composición; **bloquea composición delegada 3.2/3.3** hasta revalidar asignaciones o adoptar composición inmutable.
+- G-1 corrige ADR-042: BEFORE ROW no garantiza preceder lock de fila UPDATE; solo wrapper garantiza advisory→fila explícito. Timeout/rollback cubren inversión con repair. G-2 exige llave tenant/request no NULL y canónica. G-7 separa árbol de trabajo de SHA/run CI reales. Ledger sin TTL ni eliminación que permita reutilizar requestId; archivado futuro preservará integridad/vínculos/consultas y requiere aprobación, sin limpieza destructiva.
+- SQL arbitrario con credencial delegada puede cambiar GUC y falsificar atribución humana: PostgreSQL no autentica criptográficamente al actor. Garantías SQL son ACL, operación, tenant, scope y contención bajo contexto fijado; backend/JWT/secretos son parte de confianza. G-4/G-5/G-9 para 3.2; G-3/G-6/G-8 informativos. Sin nuevas dependencias ni producción.
+- Referencias: [constraint triggers PostgreSQL 18](https://www.postgresql.org/docs/18/sql-createtrigger.html), [READ COMMITTED](https://www.postgresql.org/docs/18/transaction-iso.html). Pruebas sin desactivar RLS/triggers/constraints.
+
 ## ADR-042 — Fronteras operativas, procedencia y recuperación verificable (2.5, 2026-10-27)
 
 - Base aprobada 2.4: `07f6b59258306bf67074b402cd71145707c83283`. Alcance exclusivo 2.5; Fase 2 cerrable únicamente tras revisión del Director técnico y Auditor. No nuevas entidades comerciales, administración delegada, SUBTREE, cache global ni despliegue productivo.
+
 - F-1: IdentityReadTransactions comprueba isVerifiedPrincipal antes de abrir transacción. Authentication emite un Principal inmutable; literal/spread no conservan procedencia. Las fixtures técnicas firman JWT y pasan por el verificador JWKS real; HTTP/Chromium usan Keycloak descartable. No bandera para desactivar validación ni registro manual en WeakSet.
+
 - D-5: Authorization elige algoritmo por fingerprint_version persistido, conserva serializador typed-node v2 y envelope exacto del módulo. Primera versión histórica real v2; CURRENT_FINGERPRINT_VERSION no cambia. Replay conserva huella, resultado, revisión y auditoría, incluso bajo concurrencia. No se reutiliza el algoritmo Organizations v1, no se inventan registros Auth v1 ni se migra historia a otra huella. Una versión futura requiere agregar algoritmo/compatibilidad y CHECK aditivo revisado.
+
 - A-2/migración13: rol organizations ordinario con tenant LOCAL UUID y fronteras AS RESTRICTIVE coherentes de lectura/escritura en los ocho objetos previos. Ya no inserta Tenant. La capacidad organizations_provisioner independiente solo realiza CREATE_TENANT, con UUID interno y operación pendiente por request antes de Tenant/GROUP. FK del ledger inicialmente null; al completar debe coincidir con el tenant contextual. El replay histórico se lee por request y se devuelve sin modificarlo. Sus ACL excluyen Company/Branch y cambios de estado; UPDATE(id) Tenant permite locks de integridad, pero guard invocante rechaza modificación de datos. No ownership, DDL, roles elevados ni credencial en API/BFF.
+
 - Mantenimiento/migración14: rol directory_maintenance independiente para comparación global explícita de fuentes/directorio e historial técnico de Organizations, sin Company/Branch ni escrituras sobre fuentes. Dos tablas propias directory_repair_operation/event, RLS ENABLE/FORCE, frontera tenant UUID, completitud diferida, historial inmutable y eventos derivados antes/después. Escritura del directorio requiere ledger pendiente y actor/tipo/motivo/request; fronteras restrictivas por comando preservan lectura diagnóstica global sin ampliar escrituras. No SECURITY DEFINER, bypass, credencial migradora o HTTP.
-- Coherencia: gate asesor por tenant antes de cualquier lock de fila, tanto en wrapper confiable como trigger aa_organization_write_gate. Repair READ COMMITTED lo adquiere antes de comparar, para observar el último commit del escritor al que esperó. El gate también cubre SQL directo sujeto a triggers; no obliga a conceder UPDATE/MAINTAIN sobre fuentes al mantenedor. Colisiones del hash pueden serializar operaciones independientes, sin conceder datos. LOCAL, timeouts y rollback conservan límites; el operador que controla su conexión/GUC sigue siendo confiable.
+
+- Corrección G-1 (3.1): el wrapper adquiere el gate asesor antes de sus locks explícitos. BEFORE ROW aa_organization_write_gate no garantiza preceder el lock de fila de UPDATE directo; puede existir inversión de orden con repair, acotada por timeout/rollback. Repair READ COMMITTED lo adquiere antes de comparar, para observar el último commit del escritor al que esperó. El gate también cubre SQL directo sujeto a triggers; no obliga a conceder UPDATE/MAINTAIN sobre fuentes al mantenedor. Colisiones del hash pueden serializar operaciones independientes, sin conceder datos. LOCAL, timeouts y rollback conservan límites; el operador que controla su conexión/GUC sigue siendo confiable.
+
 - Backup real custom PostgreSQL, manifiesto SHA-256/origen y confirmación explícita preceden reparación. Registro, datos y eventos atómicos, replay por request; compensación posterior requiere nueva operación autorizada/auditada, no borrar historia. La verificación restaura con pg_restore a otra base generada, provisiona roles independientes, remapea policies y metadata física TypeORM, reconcilia ACL y demuestra lectura HTTP. No `--clean` ni restore sobre bases existentes. El hash prueba integridad, no autenticidad; dumps ejecutan código del origen y requieren fuentes confiables. Roles globales/Keycloak/claves BFF no están respaldados por pg_dump de Platform.
+
 - F-2/F-3/F-4/F-8: deprecación se señala solo por grants históricos del contexto, una vez por request sin códigos/identidades; can conserva NO_GRANT. CompanyDemonstrationGuard se limita a su clase/handler y misma transacción decisión+proyección. **Addendum ADR-041:** cada módulo futuro deberá implementar su operación autorizada completa, no decorar cualquier handler con este Guard. La prueba de deprecación global es una partición terminal de la base descartable; solo siguen controles de ausencia de secretos y limpieza, jamás DEPRECATED→ACTIVE. Error interno desconocido/HttpException 500 responde mensaje genérico, INTERNAL_ERROR y correlación sin Retry-After; solo indisponibilidad reconocida produce 503 reintentable. 401/403/404 mantienen contratos.
+
 - F-5/F-7: UUID de GUC canónicos en minúsculas; entradas no canónicas fallan cerradas o se normalizan en la ruta confiable antes de SQL. Colecciones usan permissionsFor/scopesFor agrupados en el mismo contexto; no can por fila ni eliminación de su comprobación de manager/GUC. Sin cache de decisiones entre requests. Snapshot RR iniciado no se revoca instantáneamente; nuevas transacciones observan cambios Membership/Organizations aunque no varíen revisiones RBAC.
+
 - F-6: 500 tenants/50.000 asignaciones, memberships grandes/pequeñas y catálogo descartable exclusivamente migrador, 2 contra 40 permisos/rol. Se registran cardinalidades, conjuntos completos equivalentes al oráculo, p50/p95 método/transacción, filas/loops/buffers/heap/memoria/spill reportados. Tres warmups/30 repeticiones, sin flush OS ni SLA. Ancho20 x aumenta RolePermission y fanout de listados; can puntual y scopes por código no materializan todas las concesiones. No inferir una ley asintótica de dos puntos ni agregar índices especulativos. Artefactos/runbook describen resultados y condiciones; benchmark pesado fuera de CI ordinaria.
+
 - Instalación limpia: árbol temporal solo versionable, sin .env/volúmenes previos, frozen install, dos PostgreSQL18 separados y Keycloak conectado a Identity PG, build/suites reales/restore y limpieza del proyecto único. Job CI independiente, compatible con PowerShell/Docker Desktop y Linux. Launchers técnicos usan allowlists propias; no comparten secretos con servidores. No depende de archivos locales no versionados.
+
 - Deuda resuelta aquí: D-5, A-2, reparación soportada e instalación limpia; N-1 sigue cerrado y N-3 conserva NOT VALID+VALIDATE para CHECK/FK pobladas cuando sea válido/útil, no PK/UNIQUE. Persisten límites de SQL/GUC/host confiables, snapshots, TOCTOU técnico, colisiones/contención, crecimiento histórico y aviso TypeORM/pg. Archivos/jobs/extensiones y recuperación productiva necesitan diseño propio; no se declaran resueltos por estas pruebas.
+
 - Referencias oficiales verificadas: [pg_dump18](https://www.postgresql.org/docs/18/app-pgdump.html), [pg_restore18](https://www.postgresql.org/docs/18/app-pgrestore.html), [locking18](https://www.postgresql.org/docs/18/sql-lock.html). Detalle de actores/credenciales en SECURITY_AND_RECOVERY.md y procedimiento en OPERATIONS_RUNBOOK.md. Las decisiones históricas siguientes mantienen su contexto; esta ADR sustituye solo los puntos explícitos.
 
-| ID      | Decisión                                                                                                |
+| ID | Decisión |
+
 | ------- | ------------------------------------------------------------------------------------------------------- |
-| ADR-001 | Producto transversal con catálogo estándar más desarrollos a medida.                                    |
-| ADR-002 | Core obligatorio; módulos genéricos y personalizados opcionales.                                        |
-| ADR-003 | Despliegue multiempresa compartido y dedicado, misma base de código.                                    |
-| ADR-004 | Módulos nativos y aplicaciones independientes conectadas por adaptadores.                               |
-| ADR-005 | Datos híbridos: entidades compartidas opcionales y propiedad de datos por módulo.                       |
-| ADR-006 | White-label además de marca Innoview.                                                                   |
-| ADR-007 | Innoview administra módulos/despliegues; cliente administra usuarios y roles delegados.                 |
-| ADR-008 | Un tenant contiene un grupo con varias empresas y sucursales inicialmente.                              |
-| ADR-009 | Compartición entre empresas configurable, privacidad por defecto.                                       |
-| ADR-010 | UI Kit/App Shell para nativos; interfaz externa flexible.                                               |
-| ADR-011 | Construcción desde cero sin migrar automáticamente bases de clientes existentes.                        |
-| ADR-012 | Arquitectura híbrida evolutiva: monolito modular + aplicaciones externas.                               |
+
+| ADR-001 | Producto transversal con catálogo estándar más desarrollos a medida. |
+
+| ADR-002 | Core obligatorio; módulos genéricos y personalizados opcionales. |
+
+| ADR-003 | Despliegue multiempresa compartido y dedicado, misma base de código. |
+
+| ADR-004 | Módulos nativos y aplicaciones independientes conectadas por adaptadores. |
+
+| ADR-005 | Datos híbridos: entidades compartidas opcionales y propiedad de datos por módulo. |
+
+| ADR-006 | White-label además de marca Innoview. |
+
+| ADR-007 | Innoview administra módulos/despliegues; cliente administra usuarios y roles delegados. |
+
+| ADR-008 | Un tenant contiene un grupo con varias empresas y sucursales inicialmente. |
+
+| ADR-009 | Compartición entre empresas configurable, privacidad por defecto. |
+
+| ADR-010 | UI Kit/App Shell para nativos; interfaz externa flexible. |
+
+| ADR-011 | Construcción desde cero sin migrar automáticamente bases de clientes existentes. |
+
+| ADR-012 | Arquitectura híbrida evolutiva: monolito modular + aplicaciones externas. |
+
 | ADR-013 | Backend compartido con módulos estándar desplegados y habilitación por tenant; dedicados configurables. |
-| ADR-014 | Dependencias por capacidades e interfaces, no módulo concreto cuando sea razonable.                     |
-| ADR-015 | Comunicación adaptativa: llamadas internas nativas, HTTP/adaptadores externos.                          |
-| ADR-016 | Consistencia según proceso: transacciones locales, eventos y coordinación distribuida.                  |
-| ADR-017 | UoW compartido controlado entre módulos nativos en la misma BD; interfaces públicas.                    |
-| ADR-018 | Core separado de paquetes técnicos reutilizables.                                                       |
-| ADR-019 | Identidad central/federada; OIDC Keycloak como primera implementación.                                  |
-| ADR-020 | Autorización RBAC por alcances con políticas por recurso en Core.                                       |
-| ADR-021 | Cloud PostgreSQL compartido con tenant_id, RLS y FK tenant-scoped; dedicados con DB propia.             |
-| ADR-022 | OrganizationalUnit tipada como alcance para grupo, empresa y sucursal.                                  |
+
+| ADR-014 | Dependencias por capacidades e interfaces, no módulo concreto cuando sea razonable. |
+
+| ADR-015 | Comunicación adaptativa: llamadas internas nativas, HTTP/adaptadores externos. |
+
+| ADR-016 | Consistencia según proceso: transacciones locales, eventos y coordinación distribuida. |
+
+| ADR-017 | UoW compartido controlado entre módulos nativos en la misma BD; interfaces públicas. |
+
+| ADR-018 | Core separado de paquetes técnicos reutilizables. |
+
+| ADR-019 | Identidad central/federada; OIDC Keycloak como primera implementación. |
+
+| ADR-020 | Autorización RBAC por alcances con políticas por recurso en Core. |
+
+| ADR-021 | Cloud PostgreSQL compartido con tenant_id, RLS y FK tenant-scoped; dedicados con DB propia. |
+
+| ADR-022 | OrganizationalUnit tipada como alcance para grupo, empresa y sucursal. |
 
 ## Cambios
 
@@ -48,26 +98,39 @@ Agregar una ADR nueva con contexto, alternativas, decisión, impacto y estrategi
 ## ADR-023 — Tenant y Deployment (aceptada, 2026-10-24)
 
 - Contexto: la redacción inicial confundía aislamiento lógico e instancia de ejecución.
+
 - Alternativas: equiparar tenant con instalación o separar ambos conceptos.
+
 - Decisión: Tenant es el límite lógico de aislamiento de una organización cliente. Deployment es una instancia de ejecución que aloja uno o varios tenants. Inicialmente, un BusinessGroup por tenant.
+
 - Impacto: tenant_id, RLS y FK compuestas aíslan tenants; el Core controla permisos entre empresas y sucursales. Pertenecer al mismo grupo no concede acceso implícito.
+
 - Migración: aclaración documental de ADR-008, ADR-013 y ADR-021; aún no hay datos ni esquemas que migrar.
 
 ## ADR-024 — TypeORM inicial (aceptada, 2026-10-24)
 
 - Contexto: concretar el ORM para PostgreSQL y el UoW previsto.
+
 - Alternativas: SQL directo, otro ORM o TypeORM previsto en arquitectura.
+
 - Decisión: TypeORM inicialmente, con migraciones versionadas por su CLI y synchronize: false. Keycloak continúa como proveedor central mediante OIDC (ADR-019).
+
 - Impacto: EntityManager transaccional mediante interfaces públicas; SQL explícito para RLS/constraints cuando corresponda; roles de aplicación y migración separados.
+
 - Migración: no hay persistencia existente. TypeORM y el driver PostgreSQL se instalarán y verificarán en 0.5; no hay entidades ni conexiones en 0.2.
 
 ## Riesgos pendientes de autorización y aislamiento
 
 - Fase 1: bootstrap del primer administrador y consulta inicial de membresías para validar el tenant solicitado antes de establecer contexto, sin rol privilegiado de aplicación.
+
 - Fase 2: propiedad de recursos por empresa/sucursal, herencia explícita de scopes y compartición con denegación por defecto. RLS por tenant no cubre estas políticas.
+
 - Fase 2: constraints completas de OrganizationalUnit, referencias tipadas, unicidad y consistencia con Company/Branch.
+
 - Fase 2: RLS fail-closed y contexto transaccional sin fugas en pools, errores y workers; verificar con PostgreSQL real y rol sin bypass.
+
 - Fase 3: límites de delegación y efecto de revocación en sesiones y permisos vigentes.
+
 - Fase 4: registro mínimo que conserve separados despliegue, contratación, activación, autorización y salud.
 
 ## Pendientes de validación al implementar
@@ -77,197 +140,327 @@ Versiones locales PostgreSQL/Keycloak fijadas en 0.4 y librerías/contrato OIDC 
 ## ADR-025 — Contrato OIDC de desarrollo y aprovisionamiento (2026-10-25)
 
 - Contexto: Fase 0 oficialmente cerrada; se requiere identidad central reproducible antes del login de aplicaciones y sin sobrescribir un IdP inicializado.
+
 - Alternativas: realm master para aplicaciones, import con overwrite, hostname dinámico o realm separado con creación controlada y verificación de drift.
+
 - Decisión: realm innoview separado de master; issuer público canónico http://127.0.0.1:8080/realms/innoview, puerto derivado de KEYCLOAK_HTTP_PORT y KC_HOSTNAME fijo. Clientes públicos innoview-portal/innoview-control-center con Code + PKCE S256, callbacks/logout/orígenes exactos y sin grants heredados/M2M ni administración IdP; recurso bearer-only innoview-api. Scope openid más mappers mínimos de sub y audiencia API, sin roles/email como autoridad.
+
 - Impacto: cada app tiene identidad de cliente propia; JWT no concede acceso a tenant/empresa ni privilegios Innoview. Claves y usuarios solo en Identity. Aprovisionador Admin REST crea únicamente un realm ausente; si existe exige marca de gestión y coincidencia de campos, sin PUT/DELETE/override. Drift requiere actualización explícita revisada, no force.
+
 - Migración: no hay clientes de aplicaciones previos del proyecto ni usuarios empresariales locales. Se crea innoview y se fija hostname en el Compose de desarrollo conservando volúmenes/master. Realms ajenos se preservan y se rechazan como destino. Producción y una futura topología containerizada requieren URLs/TLS/transporte propios sin alterar validación de issuer. Detalle en OIDC.md.
 
 ## ADR-026 — Librerías y contrato de sesiones por aplicación (2026-10-25)
 
 - Contexto: preparar Next.js 16/NestJS 12/Node 24 sin implementar login, sesiones ni autorización de negocio en 1.1.
+
 - Alternativas: adaptador Keycloak específico, framework de autenticación completo, tokens en navegador o integración de estándares con BFF y sesión local.
+
 - Decisión: openid-client 6.8.8 para Code/PKCE/state/nonce/refresh/logout; jose 6.2.13 para JWKS y JWT RS256 con issuer/audiencia/tiempos/tipo. iron-session 9.0.1 seleccionada para cookie HttpOnly sellada con solo SID; tokens y refresh tokens en servidor, almacenamiento técnico/cifrado a implementar después. Instalar cada librería donde haya consumidor real: en 1.1 solo las dos primeras en herramientas de contrato.
+
 - Impacto: claves y cookies distintas por aplicación; sesiones locales distintas de SSO, protección CSRF/Origin, validación de state/nonce y rotación single-use de refresh. No usar claims de tenant/roles del IdP como permisos Core ni email como ID global. HTTP local explícito; Secure/HTTPS obligatorio al definir producción. Sin Redis ni un framework de sesiones/UoW adelantado.
+
 - Migración: no hay sesiones locales previas; no hay datos que migrar. Integración de cookies, almacenamiento técnico, Guards, CSRF y backchannel se implementarán en un incremento posterior tras revisión. La función de referencia de 1.1 no protege aún endpoints. Contrato y riesgos en OIDC.md.
 
 ## ADR-027 — Sesiones BFF persistentes y autenticación runtime (2026-10-25)
 
 - Contexto: 1.1 aprobado en 6de8c38; 1.2 integra dos consumidores Next.js y un endpoint técnico NestJS sin identidad empresarial local ni autorización organizacional.
+
 - Alternativas: tokens en cookies, Redis adicional, memoria de proceso o sesiones técnicas PostgreSQL con cookies de SID opaco.
+
 - Decisión: paquete concreto identity-bff compartido por Portal y Control Center; TypeORM y SQL parametrizado para las operaciones atómicas de sesión. Esquemas portal_sessions/control_sessions y roles restringidos independientes, propiedad del migrador. API conserva su rol sin acceso a sesiones. SID aleatorio de 256 bits sellado con iron-session; solo hash SHA-256 en la base. Payload cifrado AES-256-GCM con IV aleatorio y AAD cliente/hash, claves de cifrado distintas de las claves de cookies y entre aplicaciones.
+
 - Concurrencia: lease de refresh de 15 segundos, versión y actualización condicional; HTTP al IdP con timeout de 5 segundos fuera de transacciones SQL. Una renovación incierta o lease vencido revoca la sesión; nunca se retoma el refresh token anterior. Logout elimina el registro; una respuesta tardía no puede recrearlo. Expiración absoluta 8 horas e idle 30 minutos, transacciones login/logout de un uso y 5 minutos.
+
 - Logout: local POST con Origin/CSRF; SSO RP-initiated con client_id y redirect raíz ya registrado, sin id_token_hint. Keycloak solicita confirmación cuando tiene una sesión SSO. Esta variante estándar evita transmitir el ID token al navegador; se conserva el contrato de audiencias, PKCE y clientes públicos de ADR-025. State de logout se consume en el BFF al volver a la raíz; no crea una sesión nueva. No se promete revocación inmediata de sesiones de otras aplicaciones ni de access tokens ya emitidos.
+
 - Impacto: Guard reutilizable de autenticación y GET /auth/me con issuer/sub/clientId, sin conceder permisos. Control Center solo muestra estado técnico. Paquete compartido justificado por dos consumidores reales; sin Redis ni framework genérico. El aprovisionamiento amplía las ACL solo a los esquemas técnicos; no hay grants globales a los BFF.
+
 - Migración: conservar contraseñas/volúmenes, agregar variables nuevas, repetir db:provision y ejecutar la migración BffSessions1792915200000. Es aditiva; las reversiones siguen bloqueadas fuera de bases descartables. Cambiar claves invalida sesiones existentes; la rotación sin desconexión queda pendiente. Se formaliza 1.2 como integración runtime; identidad local y organizaciones se reubican en incrementos posteriores, sin implementarlos.
 
 ## ADR-028 — Identidad local del Core por issuer/subject (2026-10-25)
 
 - Contexto: 1.2 aprobado en 6f73da9; se necesita una referencia interna estable antes de implementar organizaciones y membresías.
+
 - Alternativas: email como clave, UUID del IdP como ID interno, upsert con actualización en cada login o UUID interno y pareja OIDC única.
+
 - Decisión: UserIdentity en esquema identity con UUID v4 propio, issuer/external_subject únicos en PostgreSQL y fechas UTC. Sin contraseñas, tokens, perfil ni afiliaciones. AuthenticationModule valida JWT y /auth/me conserva su contrato; IdentityModule usa el principal autenticado para PUT/GET /identity/me. Body con campos de identidad se rechaza. El BFF registra al completar login y muestra el UUID; sesiones válidas de 1.2 pueden resolverlo en su primera consulta autenticada.
+
 - Concurrencia: INSERT ON CONFLICT DO NOTHING seguido de lectura independiente READ COMMITTED. La restricción única serializa insert concurrentes y la lectura obtiene el registro comprometido; no CTE con snapshot anterior, asignaciones empresariales, locks HTTP ni cambios de fechas en reautenticación. API no ofrece borrado/modificación, por lo que no hay una carrera con eliminación desde runtime.
+
 - Persistencia: entidad TypeORM y migración UserIdentity1792922400000. Bootstrap aprovisiona esquema vacío gestionado y ACL como en Foundation; migrador conserva ownership limitado, sin CREATE global ni BYPASSRLS. API tiene solo USAGE/SELECT/INSERT en identity y defaults equivalentes para objetos futuros de ese módulo, sin alterar permisos de otros esquemas. BFF no accede a Identity. gen_random_uuid es nativo de PostgreSQL 18: uuidExtension=pgcrypto selecciona esa función en el driver, installExtensions=false impide DDL de extensiones al conectar.
+
 - Impacto: UUID interno independiente de clientes OIDC; mismo usuario en Portal/Control Center tiene una identidad local. No se crea Tenant/Membership/RBAC/RLS ni se conceden privilegios Innoview. Se prohíbe inferir linking por email. Nuevos issuer/sub implican nueva identidad hasta definir una vinculación auditada.
+
 - Migración: db:provision seguido de db:run, conservando filas/volúmenes previos. Tabla nueva; down sin CASCADE y CLI de reversión restringido a bases descartables. Pruebas de unicidad, concurrencia autenticada, PK/FK descartable, ACL y alineación entidad/migración. El perfil y referencias organizacionales siguen pendientes.
 
 ## ADR-029 — Retorno SSO directo al servidor, contrato OIDC v2 (2026-10-25)
 
 - Contexto: 1.2 retornaba a raíz y dependía de JavaScript para reenviar state al callback. La revisión pide validar todo el retorno en servidor.
+
 - Alternativas: relay desde un Server Component en raíz o callback dedicado registrado en el IdP.
+
 - Decisión: post_logout_redirect_uri exacto /auth/logout/callback en ambos clientes, validación y consumo de state/cookie en Route Handler; luego 303 a raíz. Sin relay JavaScript ni id_token_hint. State ausente, incorrecto, duplicado o repetido falla con 400; una petición callback sin transacción logout no revoca una sesión autenticada.
+
 - Migración: nuevo contrato innoview.contract-version=2; marca de ownership estable conservada. Instalaciones nuevas crean v2. Comando explícito oidc:migrate:logout para v1/v1 parcial: preflight completo, solo destinos legacy o nuevos conocidos y campos restantes coincidentes; PUT mínimo de atributos en cada cliente y versión del realm al final. Idempotente/reanudable, sin force, DELETE, import ni recreación. oidc:provision sigue create-only y rechaza drift; no migra implícitamente un realm previo.
+
 - Operación: ventana de mantenimiento sin ediciones administrativas concurrentes. Admin REST no ofrece transacción/CAS para el conjunto: se comprueba antes de cada escritura y al finalizar, pero no se promete atomicidad ante un administrador concurrente. Una interrupción deja v1 parcialmente migrado y se reanuda; otros cambios se preservan y bloquean la operación. Respaldar el IdP por el procedimiento operativo vigente sin versionar exportaciones con secretos.
+
 - Impacto: solo cambian dos destinos logout y la versión del contrato; issuer, scopes, callbacks login, audiencias, IDs, usuarios, claves y clientes ajenos permanecen. Desplegar runtime y contrato juntos, no mezclar versiones. Logout en curso de 1.2 debe reiniciarse; sesiones autenticadas pueden continuar. Sin promesa de revocación global inmediata/backchannel.
 
 ## ADR-030 — Organizations y correspondencia tipada sin padres duplicados (2026-10-25)
 
 - Contexto: 1.3 aprobado en ec8273f; 1.4 implementa únicamente estructura organizacional interna, sin API pública, membresías ni RLS. Se concreta el diseño inicial antes de codificar.
+
 - Alternativas: parent_id adicional en OrganizationalUnit con información repetida; modelo universal sin tablas concretas; o identidad compartida y parentesco exclusivo en tablas tipadas.
+
 - Decisión: esquema organizations con Tenant, OrganizationalUnit, BusinessGroup, Company y Branch. Tenant es aislamiento lógico, no Deployment. OU contiene UUID, tenant_id, tipo, nombre, estado y fechas; cada entidad concreta comparte su UUID con la OU y no duplica nombre/estado. Company guarda business_group_id; Branch guarda company_id. El padre de OU se deriva de esas relaciones, nunca se persiste otra copia. Un grupo no tiene padre organizacional. No hay FK circulares ni acceso a Identity.
+
 - Integridad: OU tiene PK UUID, UNIQUE(tenant_id,id) para referencias por alcance y UNIQUE(tenant_id,id,type) para subtipos; tablas concretas con PK(tenant_id,id), discriminador generado constante y FK tipada a OU. Company/Branch usan FK compuestas al padre del mismo tenant. UNIQUE del tenant en BusinessGroup impone como máximo uno; constraint triggers diferidos verifican al commit exactamente un grupo por tenant y exactamente una fila concreta de su tipo por OU, mediante búsquedas indexadas. La profundidad tipada GROUP→COMPANY→BRANCH impide ciclos por construcción; no existe parent_id libre. FK RESTRICT, sin CASCADE. Nombres y tax_id no son claves: tax_id opcional/ opaco, sin política fiscal o unicidad nacional anticipada.
+
 - Estados: ACTIVE inicial, INACTIVE reversible, ARCHIVED terminal. Transiciones ACTIVE↔INACTIVE y ACTIVE/INACTIVE→ARCHIVED, verificadas en PostgreSQL. Nombres/identificadores/vínculos no se editan desde los servicios de 1.4. Creación y reactivación requieren ancestros ACTIVE; pausar/archivar un padre no reescribe estados de descendientes. Su disponibilidad futura requiere toda la cadena activa y autorización; ningún estado otorga permisos. Sin borrado runtime.
+
 - Transacciones: crear tenant/grupo/OU atómicamente y crear empresa/sucursal con su OU en una transacción local. Escrituras internas bloquean primero el tenant para serializar cambios de estructura/estado; triggers comprueban consistencia también ante SQL directo. Consultas con snapshot coherente y tenant explícito. No hay HTTP, framework UoW genérico ni contexto RLS adelantado.
+
 - Permisos: bootstrap aprovisiona esquema vacío controlado, migrador crea objetos versionados y sigue sin CREATE global/BYPASSRLS. API recibe SELECT/INSERT y UPDATE solo de estado/fecha en Tenant/OU; no DELETE, DDL, TRUNCATE ni acceso al historial. Se reconcilian también los grants por columna, porque REVOKE de tabla no los elimina. BFF no accede a organizations. Las expresiones STORED se registran con la migración en platform_meta.typeorm_metadata privado; synchronize sigue desactivado. Las FK previenen asociaciones cruzadas, no lectura no autorizada: el rol de API todavía puede leer distintos tenants y no se expone ningún endpoint Organizations.
+
 - Migración: nueva migración aditiva; no cambiar migraciones previas ni eliminar datos/volúmenes. Los triggers diferidos permiten ensamblar filas dentro de una transacción, pero impiden commits incompletos. Pruebas reales descartables cubren integridad, rollback, concurrencia, estados, ACL y migraciones. Fase 2 añadirá RLS/contexto transaccional y autorización por alcance; no declarar aislamiento seguro antes de implementarlos.
 
 ## ADR-031 — Memberships, revocación terminal y bootstrap operativo (2026-10-26)
 
 - Contexto: 1.4 aprobado en e0dde1d. 1.5 agrega pertenencia identidad/tenant sin permisos empresariales, endpoints administrativos ni selector. Se concreta el modelo antes del código.
+
 - Decisión: memberships.membership con UUID, tenant_id, user_identity_id, estado ACTIVE/REVOKED, created_at/updated_at y revoked_at/by/reason. UNIQUE(tenant_id,user_identity_id), UNIQUE(tenant_id,id) para futuras referencias por alcance y FK RESTRICT hacia Tenant.id/UserIdentity.id como contratos explícitos de referencia, sin leer ni duplicar sus datos privados.
+
 - Estados: ACTIVE inicial; ACTIVE→REVOKED terminal. Register repetido en ACTIVE devuelve el registro original; en REVOKED falla, sin reactivación ni nueva fila. Revoke repetido conserva fecha/actor/motivo y no crea otro evento. No hay borrado runtime ni migración histórica modificada. La pertenencia y el estado del tenant son distintos: estar activo solo significa pertenecer; una selección futura deberá comprobar también disponibilidad organizacional y autorización aplicable.
+
 - Operación confiable: rol DB_MEMBERSHIP_USER independiente, NOSUPERUSER/NOBYPASSRLS/sin ownership/DDL/membresías PostgreSQL. API solo SELECT de membership; no puede escribir ni asumir el rol operativo. CLI explícito con credenciales operativas para bootstrap de un tenant e identidad existentes. El operador del entorno autorizado por acceso a esas credenciales lo ejecuta; no es un rol de negocio Innoview/cliente. Nunca credenciales bootstrap/migrador para runtime o bootstrap de pertenencia.
+
 - Auditoría: cambios materiales producen eventos CREATED/REVOKED append-only en el mismo commit, mediante triggers SECURITY INVOKER. Se guardan actor operativo, rol DB efectivo, motivo, fuente y request UUID, sin duplicar identidad/organización. CLI deriva actor de cuenta/host OS; no se acepta del frontend. Contexto de auditoría es SET LOCAL dentro de la transacción, sin fugas de pool. No se promete resistencia criptográfica frente al operador DB/migrador con control del entorno; no es un sistema de invitaciones ni auditoría universal.
+
 - Bootstrap: bootstrapFirst solo crea cuando no hay historial de pertenencias para ese tenant; repetir el bootstrap original devuelve su estado actual sin revivirlo ni añadir permisos. Otro candidato o una pertenencia previa de otro origen bloquea el bootstrap. Locks transaccionales por tenant y request UUID, restricción única y auditoría atómica resuelven concurrencia. Un request UUID registrado por una transición material no se puede reutilizar para otro destino/acción; repeticiones sin cambios devuelven el evento original y no consumen UUID nuevos. Sin SQL HTTP ni tenants/identidades creados automáticamente.
+
 - Migración: esquema vacío controlado por aprovisionamiento; migrador crea tablas/constraints/triggers versionados. Roles operativos con grants exactos por tabla/columna, sin defaults indiscriminados sobre tablas futuras. BFF sin acceso. Pruebas de CLI real, FK, concurrencia, revocación, permisos y no regresión sobre servidores descartables. No ejecutar un bootstrap real sin seleccionar explícitamente sus UUID existentes.
 
 ## ADR-032 — Consulta inicial de pertenencias antes del contexto tenant (2026-10-26)
 
 - Decisión de diseño para Fase 2, no política implementada en 1.5: la API valida JWT, resuelve UserIdentity UUID y abre una transacción con contexto local de identidad derivado solo del backend. Memberships tendrá política SELECT FORCE RLS por user_identity_id del contexto, independiente del contexto tenant; un contexto ausente/incorrecto no devuelve filas. Esa consulta devuelve únicamente pertenencias propias y puede abarcar varios tenants, sin consultar datos empresariales de ellos.
+
 - Después se valida el candidato tenant contra una pertenencia ACTIVE leída de PostgreSQL, se verifica su estado mediante el contrato Organizations y se establece contexto tenant transaccional para datos empresariales. Políticas empresariales exigirán contexto tenant y pertenencia activa de la identidad, no solo posesión de tenant_id. Al no depender la consulta inicial del tenant, no hace falta un superusuario, SECURITY DEFINER ni rol BYPASSRLS para resolver el arranque.
+
 - Revocación: no cachear pertenencia como autoridad en JWT, cookie ni frontend. Toda solicitud futura de selección/operación debe releerla en la transacción de esa operación. Una revocación confirmada se observa en solicitudes nuevas; operaciones ya iniciadas conservan las garantías de su snapshot y requieren coordinación adicional si se exige interrupción inmediata. El JWT puede seguir autenticando tras revocar pertenencia; ya no acredita acceso al tenant.
+
 - Límites: GUC de identidad/tenant solo se inyecta desde código confiable con SET LOCAL, limpiándose al finalizar. RLS no protege una conexión privilegiada ni código capaz de suplantar arbitrariamente ese contexto. En 1.5 no se crean políticas, contextos de selección ni endpoints: SELECT del rol compartido todavía no es una barrera por usuario. Fase 2 deberá probar fail-closed, pools, concurrencia, revocaciones y bootstrap con roles reales antes de exponer datos.
 
 ## ADR-033 — Entorno mínimo del proceso API y arranques normales (2026-10-26)
 
 - Riesgo corregido: 5dc4d7e separaba roles SQL, pero dev/start cargaban el `.env` completo en el proceso HTTP. Los tests filtraban sus procesos manualmente y no demostraban aislamiento de los comandos normales. Una conexión restringida no justifica exponer al servidor credenciales bootstrap/migrador/operador, IdP, otros PostgreSQL o claves BFF/testing.
+
 - Decisión: launcher API confiable con util.parseEnv de Node 24, sin dependencias nuevas; leer `.env` como datos y construir env desde cero con allowlist de configuración API y variables OS explícitas. OS solo del padre; configuración del padre prevalece sobre archivo. Spawn sin shell/execArgv/flags arbitrarios, con entorno limpio, hacia CLI Nest watch o main compilado. Dev y start comparten política JSON; el compilador incluye esa política en dist. No basta borrar process.env en el servidor ya iniciado, porque el bloque original puede seguir visible a inspección OS.
+
 - Defensa adicional: main comprueba familias privilegiadas/opciones Node/secretos inesperados antes de importar NestJS/AppModule, incluso si se omite el launcher. No bloquea variables OS ajenas inofensivas de un despliegue directo; el launcher sí descarta todo lo no permitido. El DataSource mantiene validación del rol efectivo app. No logs de valores, tokens, claves o objetos de conexión; evidencia de nombres de variables en el runtime real. Nunca un endpoint de diagnóstico.
+
 - Procesos: hijos/watch heredan solo el entorno reducido y no reciben mecanismos para recargar `.env`. Señales y finalización contemplan Linux y Windows; detener el launcher termina su árbol de servidores. Herramientas db y bootstrap conservan sus comandos confiables independientes, sin ejecutarse dentro del servidor. Launchers BFF conservan aislamiento entre roles/claves y descartan opciones Node; --port permite pruebas normales con puertos descartables, sin cambiar defaults ni contrato OIDC.
+
 - Verificación: probar comandos pnpm API dev/start con credenciales completas descartables, nombres admitidos del proceso real y herencia a descendientes; rechazo de arranque directo contaminado antes de Nest; rol app efectivo, OIDC/Identity, Memberships sin escritura y bootstrap operativo independiente. Mantener regresión PostgreSQL/Keycloak y controles de calidad/CI, sin datos habituales.
+
 - Límites: padre/terminal/launcher y herramientas operativas siguen siendo confiables y pueden acceder a secretos; el mismo usuario OS puede leer archivos compartidos. No protege frente a RCE con ese acceso, preloads ejecutados antes del launcher, un host privilegiado o secretos disfrazados dentro de una variable admitida. Producción deberá separar identidades OS, montajes/ACL y secretos por servicio, sin `.env` global en API/BFF. No implementa sandbox, despliegue, entidades, endpoints, RBAC, RLS ni 1.6.
 
 ## ADR-034 — Contexto autenticado y preferencia de tenant en sesión Portal (2026-10-26)
 
 - Contexto: 1.5 y hardening 27cb6c7 aprobados/cerrados; 1.6 permite consulta propia y navegación, sin autorización empresarial, RLS ni administración. Se mantienen ADR-030/031/032/033.
+
 - API: ContextModule compone contratos de lectura de Identity, Memberships y Organizations en una transacción REPEATABLE READ y READ ONLY con EntityManager compartido ligado al DataSource app. Cada módulo consulta solo sus datos; no UoW genérico, acceso cruzado privado ni HTTP dentro de transacción. Principal JWT verificado → UUID interno existente → tenant references de Membership ACTIVE → resumen Tenant ACTIVE con BusinessGroup existente y su OU GROUP ACTIVE. El estado del grupo reside solo en OU. No se crean identidades, tenants ni pertenencias al consultar/validar contexto.
+
 - Contrato: GET /context/options sin parámetros devuelve options de UUID/nombre tenant y grupo; POST /context/validate acepta únicamente tenantId UUID y devuelve una opción verificada (200). Lista vacía sin identidad local/pertenencia; 404 uniforme para candidato bien formado ajeno/inexistente/revocado/inactivo/archivado; 400 para formato/campos inválidos; JWT ausente/inválido 401. Cliente OIDC Portal únicamente; Control Center obtiene 403 en API contextual y 404 en BFF contextual. Es restricción técnica de aplicación, no un rol de negocio. Sin empresas/sucursales/roles ni directorio por identidad proporcionada por frontend. Respuestas no-store; detalle README.
+
 - Sesión: migración aditiva agrega selected_tenant_id nullable y context_revision a portal_sessions.sessions. Alternativa descartada: agregar selección al payload cifrado que refresh reemplaza; eso puede perder cambios concurrentes. Preferencia en columnas separadas con CAS por revisión/vigencia, independiente de version/lease de tokens. No FK empresarial ni claim permanente/cookie de tenant. Tokens permanecen cifrados en servidor; solo SID opaco sellado en cookie. No se amplían roles/grants ni cambia Control Center.
+
 - BFF: GET /auth/context revalida opciones mediante API y limpia selección obsoleta con CAS, reintentando ante concurrencia. Esta limpieza automática deriva de DB, no de un candidato/query del usuario. POST select/clear exigen sesión, Origin, CSRF, campos exactos y revisión; conflicto 409 para recargar/reintentar. Se valida el candidato antes de persistirlo; no se mantiene una transacción SQL mientras se llama al Core/IdP. Logout borra fila/contexto, y una respuesta tardía no hace upsert ni resucita la sesión. Portal revalida al montar/recuperar foco/volver y tras cambios; un fallo no muestra contexto como válido.
+
 - Límites: selección es preferencia, nunca autoridad; cada operación empresarial futura deberá validar identidad/pertenencia/estados/permisos en su transacción y establecer contexto local para FORCE RLS conforme ADR-032. Una comprobación en curso conserva su snapshot; revocaciones confirmadas se observan en comprobaciones nuevas. Hay una ventana natural entre validación HTTP y persistencia de preferencia: se tolera solo porque no concede permisos y se revalida; no es una transacción distribuida ni una garantía de cancelación instantánea. No hay RLS ni GUC definitivo en 1.6.
+
 - Verificación: fixtures PostgreSQL/Keycloak descartables, pertenencias propias/ajenas/vacías, estados, principal sin alta, validación uniforme, CSRF, CAS concurrente con refresh/logout, revocación posterior, ACL y contratos transaccionales. Playwright 1.64.1 se incorpora solo como dependencia de pruebas compatible con Node 24, usando Chromium headless fijado por esa versión y el runner Node existente. Necesidad concreta: comprobar DOM/interacciones reales del selector y ausencia en Control Center, además de HTTP; no dependencia de runtime ni framework adicional. CI usa Ubuntu 24.04 con bibliotecas de navegador preinstaladas, descarga solo ese navegador y comprueba su arranque; no actualiza fuentes/paquetes OS ajenos y limita la instalación a cinco minutos. Sin trazas ni errores del navegador que puedan revelar contraseñas. Fase 1 permanece pendiente de revisión; no se inicia Fase 2.
 
 ## ADR-035 — Contexto transaccional de identidad y RLS de Memberships (2026-10-26)
 
 - Contexto: Fase 1 oficialmente aprobada/cerrada en b04cd26/e2aaf61. Se autoriza exclusivamente 2.1. ADR-032 se concreta para Memberships, sin RLS Organizations, tenant GUC, RBAC ni endpoints administrativos. No cambia ACTIVE→REVOKED terminal ni el contrato de navegación de ADR-034.
+
 - Límite confiable: AuthenticationModule verifica JWT antes de entrar al servicio. IdentityReadTransactions.read recibe únicamente el Principal de ese backend, nunca user_identity_id del navegador. Abre una transacción app REPEATABLE READ/READ ONLY, inicializa `innoview.user_identity_id` local vacío, resuelve UUID existente por issuer/sub mediante IdentityService y fija ese UUID con set_config(..., true). Devuelve null sin ejecutar la operación si no hay identidad local/principal utilizable. No registra identidades ni hace HTTP. Operaciones reciben el mismo EntityManager; ContextModule compone allí los contratos de Memberships/Organizations. No se introduce un UoW general ni una segunda validación JWT/identidad.
+
 - Limpieza: solo ajustes LOCAL; PostgreSQL los retira al confirmar/revertir y TypeORM libera la conexión tras terminar la transacción. No guardar manager/contexto en singletons ni usar el manager global para consultas que requieran identidad. Fuera del scope, las lecturas app devuelven cero filas. Se prueba reutilización real de un pool de una conexión con pg_backend_pid, commit/rollback, identidades alternadas y concurrencia. SET SESSION de identidad está prohibido en código confiable: restauraría su valor después del LOCAL, y no forma parte de la garantía de limpieza del helper.
+
 - Migración: MembershipIdentityRls1793008800000 aditiva, con ENABLE y FORCE RLS solo en memberships.membership; sin modificar migraciones previas, grants u ownership. Roles resueltos estrictamente por marcadores gestionados. Política app SELECT compara user_identity_id::text con NULLIF(current_setting('innoview.user_identity_id',true),''); no se castea el contexto a UUID, por lo que valores ausentes/vacíos/no canónicos/inválidos no hacen match ni provocan errores de conversión. Identidad sin pertenencias tampoco ve filas. RLS permite historia propia revocada: ACTIVE y disponibilidad organizacional siguen siendo decisiones del servicio, no de esta política.
+
 - Políticas: membership_app_select concede SELECT por identidad; membership_app_boundary es RESTRICTIVE FOR ALL, conserva el filtro aunque se agregue una SELECT permisiva y usa WITH CHECK(false) para no habilitar altas/actualizaciones. ACL app siguen solo SELECT; sin DDL, DELETE, ownership, SUPERUSER, BYPASSRLS ni membresía en el rol operativo. El migrador propietario queda sometido a FORCE y no recibe política DML: SELECT no ve filas y DELETE ordinario no afecta filas. Sigue siendo confiable y capaz de cambiar DDL/políticas; no es una barrera frente al dueño del esquema.
+
 - Operador: políticas independientes SELECT USING(true), INSERT WITH CHECK(true) y UPDATE USING(true)/WITH CHECK(true), dirigidas solo al rol operativo existente. Necesita visibilidad completa para primer bootstrap, idempotencia e historial; no es administración empresarial. Conserva únicamente SELECT/INSERT y UPDATE(status,updated_at), sin DELETE/DDL/SUPERUSER/BYPASSRLS ni acceso privado a Identity/Organizations/sesiones. Triggers SECURITY INVOKER conservan marcador de rol, contexto técnico de auditoría y evento atómico; no se modifican ni elevan privilegios. audit_event sigue privado por ACL, fuera de esta primera política RLS.
+
 - Integridad: FK/UNIQUE/PK de PostgreSQL realizan comprobaciones internas globales para conservar integridad incluso si una fila queda oculta por RLS. Los SELECT explícitos de triggers sí ven las políticas del actor invocante; SELECT del operador garantiza que el bootstrap cuente todo el historial del tenant. FK a Tenant/UserIdentity y auditoría compuesta siguen RESTRICT, sin conceder lectura de sus tablas al operador. Errores de restricciones pueden revelar existencia a un actor SQL con permisos de escritura; no se exponen diagnósticos por HTTP. Las transacciones revierten tanto fila como auditoría ante un rechazo RLS, incluso después de una escritura previa dentro del mismo bloque.
+
 - Modelo de amenaza: custom GUC no autentica y no es secreto/firma. Un atacante que ya ejecuta SQL arbitrario con la conexión app puede fijar otro UUID y suplantar ese contexto. RLS no evita eso, SQL injection, un dueño DDL, superusuarios, sesiones mal configuradas o un backend que construya Principal desde datos no validados. No se usan SECURITY DEFINER ni BYPASSRLS para el lookup inicial: Identity sigue consultable por el backend restringido mediante su contrato. Conservar validación JWT, consultas parametrizadas, separación de credenciales ADR-033 y autorización NestJS futura. No presentar esto como autorización empresarial ni aislamiento de Organizations.
+
 - Verificación/operación: pruebas SQL directas sin filtros, contextos inválidos, dos identidades/varios tenants/sin pertenencias, mismo pool, rollback/concurrencia, JWT reales y navegador. Bootstrap CLI y auditoría bajo políticas, FK globales, políticas repetibles tras aprovisionamiento y reversión/reaplicación solo descartable. Actualizar código/migración y reiniciar los servidores coordinadamente; el código previo sin LOCAL fallará cerrado tras activar RLS. Ningún bypass temporal para herramientas/servidor. Bases, volúmenes y sesiones existentes se conservan.
+
 - Referencias oficiales: [PostgreSQL 18 — RLS](https://www.postgresql.org/docs/18/ddl-rowsecurity.html), [CREATE POLICY](https://www.postgresql.org/docs/18/sql-createpolicy.html), [SET LOCAL](https://www.postgresql.org/docs/18/sql-set.html). No se añaden tecnologías o dependencias.
 
 ## ADR-036 — Directorio pretenant, contexto tenant y RLS Organizations (2026-10-26)
 
 - Contexto: 2.1 aprobado en 55a1b29. Se implementa exclusivamente 2.2, pendiente de revisión. No RBAC, permisos entre empresas/sucursales, endpoints administrativos ni producción. Se mantienen ADR-030/031/032/033/034/035.
+
 - Dos momentos: IdentityReadTransactions limpia LOCAL tanto `innoview.user_identity_id` como `innoview.tenant_id`, resuelve UUID existente desde Principal validado por AuthenticationModule y establece solo identidad. Context.options consulta Memberships y una proyección mínima de Organizations con ese mismo EntityManager. No crea identidades/pertenencias. TenantReadTransactions reutiliza ese scope REPEATABLE READ/READ ONLY, verifica Membership ACTIVE y disponibilidad organizacional, fija tenant LOCAL y entrega el mismo manager a la operación. Context.validate utiliza este contrato; respuesta/selector no cambian. No HTTP dentro de SQL, SET SESSION, manager compartido ni framework UoW.
+
 - Directorio: tabla derivada `organizations.tenant_directory`, propiedad de Organizations: tenant_id/tenant_name/group_id/group_name/available. FK reales a Tenant y BusinessGroup. Solo incluye nombres/UUID y disponibilidad; nunca tax_id, compañías, sucursales o perfiles. Política app SELECT: available y Membership ACTIVE de identidad contextual, sujeta también a RLS Memberships. Una política RESTRICTIVE protege ese mismo límite. No se abre ninguna política pretenant en las cinco tablas privadas. RLS filtra filas, no columnas: app recibe SELECT únicamente de esas cinco columnas, sin grants de tabla/defaults; futuras columnas no quedan expuestas por SELECT *. Joins con tablas privadas siguen sujetos a sus propias políticas.
+
 - Tablas privadas: tenant/business_group/organizational_unit/company/branch con ENABLE/FORCE. App SELECT exige UUID textual de fila igual a tenant LOCAL y existencia de su entrada disponible en el directorio protegido por identidad/pertenencia. Política SELECT más límite RESTRICTIVE FOR ALL WITH CHECK(false); una permisiva adicional no amplía el alcance. Comparaciones de GUC como texto, sin casts a UUID: ausente, vacío, malformado o tenant ajeno → cero filas. Un usuario con varias pertenencias solo lee el tenant contextual, no todos a la vez. No se concede DML al rol HTTP.
+
 - Contrato de seguridad DB entre módulos: la política del directorio depende explícitamente de Membership(tenant_id,user_identity_id,status=ACTIVE) y de su RLS por identidad. Es una dependencia de infraestructura de aislamiento registrada aquí, sin grants al operador Organizations para consultar Memberships, sin joins privados desde servicios NestJS y sin duplicar pertenencias. Cambiar esos campos/semántica exige coordinar migraciones de ambas políticas. Las dependencias funcionales de ContextModule siguen usando servicios propietarios; esta excepción concreta de política SQL no autoriza acceso privado cruzado desde módulos de negocio.
+
 - Escrituras: nuevo rol gestionado `organizations`, con credenciales propias DB_ORGANIZATIONS_USER/PASSWORD, independiente de app/migrador/operador Memberships/BFF. NOSUPERUSER/NOBYPASSRLS, sin ownership, memberships de roles, DDL, DELETE ni acceso a otros esquemas privados. Políticas propias SELECT/INSERT en objetos exactos, UPDATE(status,updated_at) únicamente en Tenant/OU; UPDATE directorio derivado solo desde trigger. Sin grants automáticos a objetos futuros. OrganizationsService exige ese rol para sus operaciones internas; el provider HTTP conserva DataSource app y falla al escribir. No existe controller administrativo ni privilegio empresarial implícito.
+
 - Auditoría: contexto LOCAL técnico actor OS host:usuario y request UUID, exigido por trigger invocante de escritura. Eventos INSERT/STATUS_CHANGED en organizations.audit_event, con tenant/registro/tipo/actor DB/request/fecha y estados, sin datos privados de perfil. Son atómicos con la operación; repetición sin cambio no duplica eventos. Auditoría inmutable, sin lectura API/BFF. INSERT directo en auditoría o modificación directa del directorio rechazados por trigger de derivación (rol y profundidad); no SECURITY DEFINER. Actor OS es atribución técnica del operador confiable, no identidad empresarial ni evidencia criptográfica. Quien controla la credencial operativa controla sus operaciones/auditoría técnica; el dueño DDL sigue siendo confiable.
+
 - Proyección coherente: triggers de constraint diferidos SECURITY INVOKER sincronizan el directorio al commit de Tenant/BusinessGroup/OU. El rol operativo ve la estructura completa bajo sus políticas, preservando triggers previos de integridad, FK compuestas y estados. La disponibilidad se deriva de Tenant ACTIVE y OU GROUP ACTIVE; no es una segunda autoridad sobre estados. No hay ventana de commit con estado privado nuevo y proyección antigua. Fallos revierten estructura, eventos y proyección. FK/UNIQUE verifican integridad global incluso ante filas ocultas; no son confidencialidad frente a un escritor confiable. Operador Memberships mantiene sus políticas, bootstrap y auditoría sin grants Organizations.
+
 - Migración: OrganizationsTenantRls1793016000000 agrega proyección/auditoría y realiza backfill de estructuras existentes antes de activar FORCE. No inventa eventos históricos, cambia sesiones ni reescribe migraciones. Revoca escritura app y defaults amplios de Organizations. Aprovisionamiento repetido reconcilia ACL de tablas y columnas, preserva datos/políticas. Coordinación obligatoria: detener HTTP, agregar credencial operativa, aprovisionar, migrar, aprovisionar nuevamente y reiniciar código compatible. Sin bypass temporal; código viejo fallará cerrado. Down solo descartable, no restaura escrituras inseguras de API.
+
 - Límites: pertenencia/contexto tenant no conceden permisos a empresas/sucursales. No exponer getStructure sin futuros Guards de permisos/alcance. Revocación confirmada bloquea operaciones nuevas; una transacción ya iniciada conserva su snapshot. GUC no es credencial: SQL arbitrario puede modificar identidad y tenant. RLS no sustituye JWT, consultas parametrizadas, autorización NestJS, aislamiento de secretos ni separación de módulos. No cubre todavía cachés, archivos, jobs o autorización empresarial.
+
 - Evidencia requerida: PostgreSQL real con tres tenants, dos identidades y una sin pertenencias; SQL sin WHERE/joins, columnas nuevas del directorio, políticas adicionales, contextos inválidos, conexión física reutilizada, rollback/concurrencia, revocación/estados, grants efectivos, operador auditado, upgrade de siete migraciones con datos sintéticos, reversión/reaplicación descartable. Mantener Keycloak/runtime/Chromium y hardening de procesos. Referencias: [RLS PostgreSQL 18](https://www.postgresql.org/docs/18/ddl-rowsecurity.html), [políticas restrictivas](https://www.postgresql.org/docs/18/sql-createpolicy.html), [privilegios de columnas](https://www.postgresql.org/docs/18/sql-grant.html). Sin dependencias nuevas.
 
 ## ADR-037 — Operaciones confiables, hardening y diagnóstico (2.3a, 2026-10-26)
 
 - Base: 2.2 aprobado en 9175804. Se divide 2.3 en 2.3a (este hardening, pendiente de revisión) y 2.3b (persistencia RBAC, sin autorización de ejecución todavía). No se implementa Authorization, roles/permissions, Guards empresariales, cachés, reparación automática ni despliegue. Esta ADR sustituye **solo** el actor OS implícito, request UUID por intento y manager opcional de Organizations descritos históricamente en ADR-036. Memberships conserva modelo, historial, controles y ACTIVE→REVOKED terminal.
+
 - Contrato pequeño: TrustedOperation compartido actor/reason/requestId, sin dependencia circular entre módulos. Organizations agrega actorType INNOVIEW_OPERATOR/SYSTEM/USER_IDENTITY. Se admiten únicamente los dos actores técnicos; USER_IDENTITY queda representable con FK real a Identity en operación y evento, pero se rechaza en servicio/trigger hasta existir principal autenticado y autorización administrativa. El actor técnico procede del invocador confiable, no exclusivamente del host. OS/host es metadato complementario, no prueba criptográfica; quien controla la credencial operativa sigue siendo actor confiable. No se aceptan estos datos desde HTTP.
+
 - Idempotencia: organizations.operation con PK global request_id, tenant FK nullable durante alta, tipo, SHA-256 de argumentos canónicos v1, procedencia/motivo, resultado JSONB y fechas. Formato determinista de claves ASCII, UUID minúsculas y nombres normalizados como el servicio; omisión/null/valor taxId etiquetados por separado. Mismo request exige huella, actor/tipo/motivo iguales; devuelve exactamente la representación persistida, sin repetir datos/eventos. Reutilización con otra operación/tenant/argumentos/contexto produce REQUEST_ID_CONFLICT seguro. Un replay no refleja necesariamente el estado actual ni autoriza nada.
+
 - Concurrencia: READ COMMITTED, INSERT ON CONFLICT DO NOTHING y relectura en sentencia nueva tras commit concurrente; nunca seguir consultando una transacción abortada por UNIQUE. PK definitiva, sin depender de advisory locks. Para tenant existente, FOR UPDATE **antes** del INSERT/FK del registro evita promoción concurrente de KEY SHARE y deadlocks; los triggers de integridad existentes conservan ese orden de serialización. Registro, estructura, eventos y directorio se confirman juntos. Constraint diferida comprueba resultado/completed_at/tenant al commit. Registro completado inmutable; INSERT solo inicia una operación pendiente. No UNIQUE(request_id) en audit_event: un alta produce varios eventos.
+
 - Migración aditiva OrganizationOperations1793023200000, novena: auditoría anterior mantiene actor/request/fechas; actor_type LEGACY_UNVERIFIED identifica explícitamente procedencia que no puede demostrarse. Nuevos eventos incluyen actor_type, FK actor_identity_id, reason, technical_source y FK operation_request_id. No se inventa historial de operaciones anteriores. SECURITY INVOKER, FORCE RLS y grants exactos solo operador Organizations; API/BFF/Memberships sin acceso. Aprovisionamiento reconcilia ACL por columna; no hay permisos DDL, ownership, SUPERUSER, BYPASSRLS ni membresías privilegiadas. No se modifican migraciones o políticas históricas.
+
 - Retención durable de operaciones estructurales y eventos, sin borrado automático ni reciclaje de UUID. PK global, índice (tenant_id,created_at) e índice audit_event(operation_request_id). Resultados privados pueden contener nombres/atributos de estructura: acceso operativo y backups protegidos, nunca logs/browser. Archivo futuro exige preservar unicidad/replay o tombstones; medir crecimiento antes de política temporal. Runbook documenta operación, límites y coordinación de código/migración/pools.
+
 - Lecturas: getStructure exige manager de su mismo DataSource en transacción activa. API además debe tener identidad y tenant contextual coincidente; operador técnico puede leer bajo sus propias políticas. No se abre otra transacción dentro del método. Falta de contexto inesperada se rechaza y observa antes del SQL privado. SQL válido con cero filas no se clasifica como ataque. Scope validado no concede permisos empresariales ni habilita nuevas rutas.
+
 - Timeouts por rol y base: API/BFF 5s statement, 10s idle-in-transaction, 30s transaction; operadores 20s/30s/120s. Sin modificar bootstrap/migrador; límites iniciales para transacciones locales cortas, ajustables solo con evidencia. Nuevas conexiones deben comprobar valores efectivos. transaction_timeout existe desde PostgreSQL 17 y se fija antes del BEGIN; PostgreSQL 18 termina sesión por duración total, no solo consulta. Pruebas reales de cancelación, terminación, rollback y recuperación del pool con LOCAL limpios. Defaults no impiden que SQL arbitrario cambie settings ni cancelan instantáneamente snapshots; código confiable no los desactiva. Reiniciar pools tras provisionar.
+
 - Observabilidad mínima sin dependencia nueva: JSON con taxonomía estable AUTHENTICATION_REJECTED/AUTHORIZATION_REJECTED/SECURITY_CONTEXT_MISSING/DATABASE_PRIVILEGE_REJECTED/DATABASE_UNAVAILABLE/DATABASE_OPERATION_FAILED/TRUSTED_OPERATION_REJECTED/REPLAY/CONFLICT. Correlation HTTP UUID validado o generado, propagación AsyncLocalStorage y respuesta X-Correlation-Id; requestId técnico validado. Solo esos identificadores y evento, nunca objetos error/request, JWT, cookies, secretos, SQL/parametrizaciones o UUID de usuario. SQLSTATE 42501 se distingue de conexión/indisponibilidad y otros fallos. No es todavía evaluación de permisos ni plataforma de tracing; ausencia legítima de opciones no es error de seguridad.
+
 - Diagnóstico explícito read-only con operador Organizations existente: inventario pg_catalog de siete esquemas, columnas/privilegios efectivos por OID, pg_policies/expresiones exactas, flags, ownership/DDL, secuencias/funciones/defaults. Incluye Tenant.id, nuevas tablas y columnas; excepciones no-RLS explícitas para Foundation/metadata/Identity/sesiones/auditoría Memberships. Default grants previos de probe/sesiones/Identity se clasifican expresamente, sin generalizarlos a dominios nuevos. Cambios de deparse PostgreSQL requieren revisión del contrato esperado. Las pruebas inducen drift en una fixture y prueban detección/restauración, sin alterar políticas para operar normalmente.
+
 - Directorio: FULL OUTER JOIN read-only contra fuente en snapshot coherente; exige rol Organizations para no concluir salud desde visibilidad parcial API. CLI entrega cantidad/tipos, no información privada; sin endpoint, bypass ni reparación. Registros faltantes/inesperados, grupo/nombres/disponibilidad divergentes fallan el diagnóstico. Runbook de incidente exige mantenimiento, backup restaurado/verificado, actor autorizado, script específico revisado/transaccional, evidencia de cambios, rollback y chequeos posteriores. No se ofrece desactivación rutinaria de triggers ni reparación genérica. Herramienta soportada en 2.5; una falla real de integridad exige corrección inmediata, no postergación automática.
+
 - Cierre de Fase 2: 2.3b persistencia RBAC, 2.4 evaluación/Guards y 2.5 verificación de alcances empresariales, reparación soportada e instalación desde cero con comando documentado y validación automática CI. RLS actual aísla tenants; no resuelve permisos entre empresas/sucursales. Archivos/jobs/procesos futuros requieren controles propios. GUC alterables por SQL arbitrario, advertencia TypeORM/pg y ausencia de autorización empresarial siguen abiertos. No avanzar sin revisión.
+
 - Referencias verificadas: [timeouts PostgreSQL 18](https://www.postgresql.org/docs/18/runtime-config-client.html), [release PostgreSQL 17](https://www.postgresql.org/docs/17/release-17.html), [SQLSTATE](https://www.postgresql.org/docs/18/errcodes-appendix.html). Detalle operativo en OPERATIONS_RUNBOOK.md.
 
 ## ADR-038 — Addendum a ADR-037: triggers, huellas y locks (2.3a.1, 2026-10-26)
 
 - Base: 685a29c aprobado con condiciones. Se implementa exclusivamente 2.3a.1; revisión pendiente, sin autorización para 2.3b/RBAC. ADR-037 y las nueve migraciones anteriores conservan su historial. OperationTriggerHardening1793030400000 es la décima migración, aditiva; no cambia políticas RLS, ownership ni amplía privilegios.
+
 - Triggers: guard_operator_write y audit_change validan primero GUC presente/UUID canónico minúsculo mediante una sentencia IF PL/pgSQL, luego convierten a variable UUID local y buscan `o.request_id=operation_uuid`. No se castea la columna, ni se confía en el orden de evaluación de predicados SQL. Ausente/vacío/malformado/no canónico se rechaza con 42501, sin 22P02. Se mantienen rol gestionado, operación pendiente y coincidencia de actor/motivo/tipo; audit_change también verifica esos controles independientemente. guard_operation verifica OLD y NEW request UUID contra contexto durante UPDATE, procedencia y estado pendiente; no permite DELETE ni modificar historia completada. Grants por columna y atomicidad permanecen.
+
 - Auditoría: se retira DEFAULT LEGACY_UNVERIFIED de actor_type, sin modificar filas pasadas. Nuevos eventos deben declarar procedencia; los verificados requieren technical_source no nulo/no vacío. FK y referencia a la operación se conservan. Los eventos de legado preexistentes con fuente desconocida siguen válidos, sin atribución inventada. El trigger de derivación impide inserciones directas del operador; las constraints se ejercitan con mantenimiento exclusivamente en fixture revertida.
+
 - Huellas: fingerprint_version smallint NOT NULL, CHECK 1/2. Registros existentes reciben versión 1 sin recalcular hash/resultados/fechas; DEFAULT 2 y servicio explícitamente v2 para operaciones nuevas. Replay lee versión persistida y aplica el algoritmo correspondiente. V1 queda congelado: JSON `{version:1,type,args}` con solo claves del primer nivel de args ordenadas, incluido el orden histórico de taxFingerprint. V2 usa árbol JSON tipado recursivo con claves ordenadas, arrays densos conservando orden, marcadores inequívocos de ausencia/undefined/null/valor y envelope con versión/tipo. Admite objetos planos, strings, booleanos y números finitos (distingue -0); rechaza ciclos, accessors, propiedades no enumerables/symbol, arrays dispersos y valores/tipos no soportados, sin ejecutar getters/toJSON. Normalización UUID/nombres permanece en el servicio. No hay librería nueva ni se afirma implementar un estándar externo de canonicalización.
+
 - Upgrade coordinado: detener operadores y runtime antes de migrar y actualizar código. No mezclar escritores v1 antiguos con DEFAULT 2. Lectura/replay de operaciones persistidas v1 permanece soportada; se prueba con altas Tenant y Company con argumentos anidados existentes antes de migrar. Conflictos, resultados originales y eventos no se alteran. Reversión sigue restringida al ciclo descartable de pruebas; no usar down para volver a código antiguo sobre registros v2 persistentes.
+
 - Locks: provisioning fija lock_timeout=1s en API/BFF/operadores y 3s en migrador, dejando bootstrap independiente. No modifica statement/idle/transaction del migrador ni los otros límites aceptados. Nuevas conexiones verifican los cuatro valores. lock_timeout limita cada espera de lock, no tiempo total ni ejecución una vez adquirido; 55P03 se trata como fallo de persistencia controlado, sin consultas sobre la transacción abortada. Rollback conjunto de DDL/datos/auditoría/history y reintento de la misma operación cuando cesa la contención. No reintentar migraciones ciegamente: plan de mantenimiento/inspección/reintento en runbook.
+
 - Evidencia indexable: fixture con aproximadamente 20.000 operaciones sintéticas completas bajo rol Organizations real, sin desactivar triggers para la carga; ANALYZE y EXPLAIN FORMAT JSON. Predicado anterior con columna ::text usa Seq Scan; UUID puntual utiliza operation_pkey (se admiten Index/Index Only/Bitmap Index Scan). No se fuerza enable_seqscan ni se imponen tiempos de reloj. Regresión comprueba el cuerpo de ambas funciones y sus predicados UUID además del plan. Carga y contención DDL solo en base generada descartable; no datos/volúmenes habituales.
+
 - Riesgos conservados: operador Organizations tiene alcance técnico amplio, a revisar en 2.5; reasonCode detallado queda para evolución posterior. Para auditar operaciones hay que consultar operation **y** audit_event: no-op/replay y eventos múltiples no son equivalentes a una fila por operación. Dependencia de representación SQL pg_policies, GUC alterables por SQL arbitrario, snapshots iniciados y advertencia TypeORM/pg siguen vigentes. No se resuelven estos riesgos ni reparación/cachés/permisos empresariales en esta corrección.
+
 - Referencias oficiales verificadas: [lock_timeout PostgreSQL 18](https://www.postgresql.org/docs/18/runtime-config-client.html), [planes EXPLAIN](https://www.postgresql.org/docs/18/using-explain.html). Runbook amplía procedimiento y evidencia sin sustituir decisiones históricas.
 
 ## ADR-039 — Modelo Authorization persistente y operador por tenant (2.3b, 2026-10-26)
 
 - Base aprobada: `0d92c34`, cierre oficial de 2.3a/2.3a.1. Se autoriza exclusivamente persistencia RBAC y preparación del puerto; la evaluación funcional, Guards y administración HTTP siguen pendientes de 2.4. Sin dependencias nuevas, caché, servicios externos ni cambios de login. Authentication valida identidad externa; Identity resuelve UUID; Memberships conserva pertenencia; Organizations conserva estructura/ciclo; Authorization es dueño de concesiones.
+
 - Esquema propio `authorization` (identificador SQL entre comillas). Permission global con UUID estable, código namespaceado `<modulo>.<recurso>.<accion>` en CHECK y validación TS, owner_module igual al prefijo, descripción, ACTIVE/DEPRECATED, replaced_by opcional FK real. Código/UUID/propietario inmutables; DELETE prohibido; DEPRECATED terminal. Solo el migrador, mediante migraciones confiables, cambia catálogo. Operadores/API tienen únicamente SELECT del catálogo; no se comparte la credencial migradora. Dos permisos técnicos foundation.probe.read/write no corresponden a endpoints o capacidades comerciales. Un permiso deprecado permanece referenciado históricamente, pero no es efectivo ni admite nuevas relaciones. Lock advisory transaccional exclusivo del catálogo y compartido de nuevas asociaciones evita la carrera entre deprecación y alta.
+
 - Role tiene tenant/UUID, nombre único exacto por tenant, descripción, ACTIVE/INACTIVE y fechas; sin rol global/reservado injustificado. RolePermission conserva UUID/tenant/rol/permiso, ACTIVE/REVOKED, fechas/motivo de revocación; UNIQUE parcial de relaciones ACTIVE. Revocar es terminal; una nueva concesión es otra fila. RoleAssignment usa el mismo historial terminal, UUID y UNIQUE parcial sobre tenant/membership/role/scope_unit/scope_type ACTIVE. Revocación repetida no cambia historial ni revisión.
+
 - Excepción referencial explícita a AGENTS.md: Authorization posee las FK compuestas `(tenant_id,membership_id)` hacia Memberships, `(tenant_id,role_id)` hacia Role y `(tenant_id,scope_unit_id,scope_type)` hacia OrganizationalUnit, reutilizando `uq_unit_tenant_id_type`. El migrador crea las FK; los roles runtime no reciben REFERENCES ni lectura amplia de otros esquemas. Las comprobaciones de integridad referencial PostgreSQL mantienen integridad global incluso ante filas ocultas por RLS; no verifican disponibilidad ACTIVE ni autorizan negocio. ON DELETE RESTRICT e historial inmutable impiden borrados accidentales. Reparaciones futuras deben respetar esta dependencia; módulos comerciales no consultan tablas privadas ajenas.
+
 - Semántica v1: default deny, grant-only, scopes GROUP/COMPANY/BRANCH **exactos**, sin herencia automática. GROUP es la unidad del grupo único, no un comodín. Una nueva compañía/sucursal nace sin concesiones implícitas; varias compañías requieren asignaciones explícitas. SUBTREE exige nueva ADR/contrato/pruebas. Toda evaluación futura comprobará Membership, Tenant, unidad y todos sus ancestros ACTIVE mediante profundidad fija GROUP→COMPANY→BRANCH; no hay motor de árboles arbitrario. Una baja del padre invalida disponibilidad sin revocar físicamente cada concesión.
+
 - Operador Authorization independiente de app/BFF/otros operadores/migrador/bootstrap: sin SUPERUSER/BYPASSRLS/CREATEROLE/DDL/ownership/sesiones. Políticas ENABLE/FORCE en seis tablas tenant-scoped, frontera ALL AS RESTRICTIVE y políticas permisivas por operación con el **mismo** predicado UUID: `tenant_id = CASE WHEN <GUC canónico> THEN <GUC>::uuid ELSE NULL::uuid END`. No cast de columna a text ni dependencia del orden AND/OR. Contexto ausente/malformado produce NULL y cero filas/rechazo de escrituras. No políticas operativas USING(true)/WITH CHECK(true). Agregar una SELECT permisiva no amplía la frontera. Catálogo global/versión son excepciones no-RLS explícitas controladas por migrador. API solo SELECT del catálogo y cuatro tablas de concesiones/revisión bajo tenant validado y directorio disponible; RoleAssignment además depende de Membership visible por identidad. Operation/AuditEvent quedan inaccesibles a API/BFF.
+
 - El camino técnico valida TrustedOperation y marca de rol antes de establecer LOCAL tenant/actor/motivo/requestId/tipo. Tenant contextual y argumentos proceden de la misma operación normalizada. Mismo EntityManager durante la transacción; commit/rollback limpian contexto. El helper compartido centraliza GUCs, no selecciona credenciales ni concede privilegios. Quien controla una conexión operativa puede modificar GUCs: RLS **no autentica** a ese proceso ni protege frente a SQL arbitrario en la misma conexión. No SECURITY DEFINER/superusuario/BYPASSRLS como atajo.
+
 - Authorization tiene Operation/AuditEvent **propios**, sin ampliar el CHECK de organizations.operation. PK request_id global dentro del módulo; envelope `{module,version,operation,args}`, canonicalización recursiva v2 y SHA-256. UNIQUE PostgreSQL serializa requests concurrentes; relectura READ COMMITTED devuelve resultado JSON original o REQUEST_ID_CONFLICT ante otro tenant/tipo/argumentos/actor/motivo. No se consulta una transacción abortada. Registro/datos/revisión/eventos se confirman juntos; constraint diferida exige resultado completo, triggers protegen actualización contextual e historial. Auditoría puede tener varias filas por operación, ninguna adicional en replay/no-op. Actor técnico y motivo proceden del invocador confiable, no de HTTP; OS/host solo metadato. Catálogo no usa este registro.
+
 - CatalogVersion bigint singleton crece por cada cambio real de Permission dentro de la misma transacción (seed inicial: 2). TenantAuthorizationRevision bigint crece por cada fila de concesión/rol realmente modificada mediante triggers y `revision=revision+1`. El wrapper crea la fila cero y la bloquea antes de modificar concesiones: serializa cambios del tenant, aceptable por baja frecuencia. Concurrencia no pierde incrementos; replay/no-op no incrementa. API solo lee; operador no puede falsificar revisión fuera de triggers. Sin cachear decisiones: `(catalog_version,tenant_revision)` no refleja bajas de Memberships/Organizations. Nunca reutilizar una comprobación vieja de disponibilidad como válida.
+
 - Las altas técnicas validan pertenencia y unidad/ancestros mediante contratos internos mínimos de sus propietarios, con credenciales separadas. El operador Authorization no obtiene lectura privada general. Esas lecturas no comparten la transacción escritora: hay una ventana TOCTOU explícita. Guardar ACTIVE no declara efectividad; 2.4 deberá releer pertenencia, tenant y ancestros en su transacción de evaluación. No llamadas HTTP dentro de transacciones. Sin fábrica pública de contexto autenticado ni DTO HTTP convertido a autoridad.
+
 - Puerto TypeScript `authorization.access@1`: can(context,permission,{type,unitId}), permissionsFor(context), scopesFor(context,permission). Contexto nominal de identidad/tenant ya validados con manager transaccional. **No se registra proveedor funcional** ni stub permisivo. scopesFor prepara filtrado de colecciones mediante una consulta, no can() por fila; permissionsFor prepara menús posteriores. En extensibilidad un adaptador HTTP traducirá un contexto validado por backend al contrato, con autenticación de servicio y controles equivalentes; no se implementa ahora.
+
 - N-1: Organizations.write y Authorization.write usan lock_timeout 8s LOCAL antes de locks/ON CONFLICT; default del rol 1s y statement 20s se conservan. 55P03/40001/40P01 y fallos de conexión pertinentes se convierten en TrustedOperationTransientError, retryable con Retry-After sugerido 1s y evento TRUSTED_OPERATION_CONTENTION sin SQL/secretos. REQUEST_ID_CONFLICT permanece permanente. Sin reintentos automáticos ni nuevo requestId. La futura capa HTTP 2.4 traducirá disponibilidad transitoria sin exponer internals. Prueba de replay con primer escritor demorando 1,6s, más que el default y menos que 8s.
+
 - N-2: CURRENT_FINGERPRINT_VERSION exportada gobierna cálculo y persistencia; se preserva replay v1/v2 Organizations. N-3: CHECK/FK adicionales sobre tablas pobladas usarán ADD CONSTRAINT NOT VALID y VALIDATE cuando corresponda; nunca PK/UNIQUE. Esta migración aplica el patrón al CHECK technical_source de organizations.operation; nuevas tablas crean restricciones directamente. La validación en la misma transacción de mantenimiento no promete minimizar todos los locks. N-4: fixture de 20.000 operaciones en lotes de 1.000 transaccionales, triggers activos; se conserva evidencia Seq Scan frente a PK UUID indexada.
+
 - Diagnóstico inventaría objetos reales y exige clasificación explícita de tablas, RLS/políticas restrictivas, ACL por columna, funciones, esquemas, secuencias y ownership; sin comodines ni número fijo de tablas. Única función invocable por operador Authorization: require_operation SECURITY INVOKER requerida por sus triggers, validando operación pendiente por PK UUID. Launchers mantienen allowlists; DB_AUTHORIZATION_USER/PASSWORD quedan excluidas de los tres servidores y sus hijos.
+
 - Evidencia: suite descartable PostgreSQL 18/Keycloak/Chromium y benchmark separado con semilla fija, 500 tenants/50.000 asignaciones sesgadas, ANALYZE y EXPLAIN JSON con aserciones de nodos sin forzar optimizador ni umbrales temporales. Son consultas de referencia del modelo, no medición definitiva del evaluador, que corresponde a 2.4. No datos/volúmenes habituales ni secretos versionados. Riesgos 2.4: revalidación efectiva/TOCTOU/ancestros/snapshots, interpretación SQL de políticas y diseño de invalidación. 2.5: contención del operador Organizations de alcance amplio, diagnóstico/reparación soportada de tenant_directory e instalación desde cero reproducible; advertencia conocida TypeORM/pg conservada.
+
 - Referencias verificadas: [RLS PostgreSQL 18 y FK](https://www.postgresql.org/docs/18/ddl-rowsecurity.html), [políticas restrictivas y USING/WITH CHECK](https://www.postgresql.org/docs/18/sql-createpolicy.html), [NOT VALID/VALIDATE](https://www.postgresql.org/docs/18/sql-altertable.html). Sin nuevas tecnologías ni dependencias.
 
 ## ADR-040 — Preparación sin locks y consultas candidatas RBAC (2.3b.1, 2026-10-26)
 
 - Base aprobada con condiciones ee6757ee7b22346227f4f053876194342533af6d. Se resuelven D-6/D-8 en runtime técnico y D-1/D-2/D-3 como preparación medible del evaluador. No se registra proveedor funcional authorization.access@1, Guard, endpoint ni caché. No cambian ACL, RLS, índices, migraciones o dependencias.
+
 - D-6 sustituye únicamente la ubicación de las validaciones de assign descrita en ADR-039. Primero se valida rol/GUC y se consulta replay en una transacción read-only corta, liberada antes de llamar a propietarios. Después Memberships y Organizations verifican referencias con credenciales propias, sin retener conexión/transacción/locks Authorization ni esperar su transacción escritora. Finalmente se abre la escritura idempotente existente. Prechequeo no es autoridad de concurrencia ni una reserva de requestId.
+
 - UNIQUE(request_id) sigue siendo la autoridad: INSERT ON CONFLICT y relectura READ COMMITTED resuelven operaciones concurrentes. La escritura comprueba replay **antes** de usar el resultado/error de preparación y antes de bloquear revisión. Un replay equivalente conserva resultado histórico pese a revocar pertenencia, archivar/desactivar unidad, inactivar rol/tenant. Otro tipo/tenant/actor/motivo/argumentos es REQUEST_ID_CONFLICT permanente. Una fila concurrente invisible no produce un falso conflicto: se espera acotadamente por la PK; commit permite replay, rollback exige validar la nueva operación. Si las referencias fallaron y no hay operación equivalente, se revierte el registro pendiente sin datos/eventos/revisión parciales.
+
 - Fallos de adquisición de pools reales se clasifican como POOL_ACQUISITION_TIMEOUT únicamente para mensajes fijos conocidos de pg-pool sin code/SQLSTATE; error técnico transitorio y evento seguro, sin registrar mensaje/SQL/secretos. No se amplían privilegios ni se añaden consultas a tablas privadas desde Authorization. No reintentos automáticos ilimitados, conservar requestId. D-8 prueba 8s dentro de una operación Authorization real demorada 1,6 s, replay concurrente con revocación mientras el primero aún no confirmó y retorno a 1 s/GUC limpios. Pruebas de pool saturado exigen que la adquisición propietaria siga pendiente mientras se verifica el lock NOWAIT libre; sin depender de una comparación de latencia.
+
 - La ventana TOCTOU entre propietarios y persistencia permanece deliberadamente explícita. Una asignación guardada/replay no otorga acceso; 2.4 deberá revalidar Membership, Tenant, unidad/ancestros ACTIVE y concesiones en la evaluación transaccional. No se introduce caché de disponibilidad, sesión autoritativa ni autenticación por GUC. SQL arbitrario con conexión confiable puede alterar contexto; RLS no autentica ese proceso.
+
 - D-1/D-3 amplían exclusivamente infra/authorization: SQL candidato para permisos distintos, scopes por permiso y EXISTS exacto, en tenant grande/pequeño y membership con 420 / 20 asignaciones. Se comparan CTE inline y materializados bajo roles reales, usando el mismo TenantReadTransactions actual y todas las políticas ENABLE/FORCE. La variante materializada consume el tenant recién validado por el propietario en esa misma transacción (CTE de valor UUID, sin segunda lectura de disponibilidad); la inline conserva la lectura explícita adicional de Tenant. Materializar conjuntos en la sentencia no evita ni debilita comprobaciones RLS anidadas. Unidades y ancestros se filtran mediante joins de profundidad fija, sin herencia. Los prototipos no son una implementación de can/permissionsFor/scopesFor ni una capa paralela de autorización.
+
 - Cada ejecución carga 500 tenants / 50.000 asignaciones sesgadas con la misma semilla y triggers activos; VACUUM(ANALYZE) por el propietario fuera de transacciones. Se conservan conteos exactos, baseline aprobado previo y EXPLAIN JSON completo con estimaciones/reales/loops/buffers/Index Cond/Filter/descartadas/Heap Fetches. El resumen Membership/directorio incluye chequeos explícitos y subplanes RLS; métricas inclusivas no se suman ni aíslan mágicamente el costo RLS. Latencias locales con buffers calientes/host compartido no son SLA ni umbrales CI. El cambio de preparación y formas de consulta impide atribuir la diferencia temporal histórica solo a una optimización.
+
 - Recomendación para 2.4: usar como punto de partida conjuntos materializados de asignaciones/concesiones/unidades para listados de permisos/scopes, preservando todas las lecturas de disponibilidad en el snapshot actual; mantener EXISTS puntual para alcance exacto. El caso grande reduce la lectura de asignaciones de 21 filas × 420 loops a 420 × 1 y los hits totales de 252.968 a 4.914 en scopes. No prometer ese resultado con cualquier distribución; medir el evaluador real antes de adoptarlo como contrato de rendimiento.
+
 - D-2: conservar assignment_member_scope sin migración adicional. EXPLAIN de alcance exacto utiliza tenant/membership/type/unit como Index Cond, y la membership pequeña usa su prefijo tenant/membership. El índice tiene beneficio demostrado y costo de almacenamiento/mantenimiento reconocido; no hay evidencia suficiente para retirarlo ni justificación para índices alternativos especulativos. Las escrituras y accesos por tenant/membership se preservan; benchmark registra tamaños de índices y conserva las 50.000 altas con restricciones/auditoría activas.
+
 - Riesgos no resueltos: D-4 (uuid::text Organizations) y D-5 (evolución histórica de huellas Authorization) al cierre de Fase 2. D-7: rol INACTIVE puede conservar asignaciones ACTIVE históricas y 2.4 debe filtrarlo. uq_role_tenant_name reserva nombre incluso INACTIVE; no se cambia esa semántica. A-2/alcance amplio del operador Organizations, reparación soportada de tenant_directory e instalación desde cero quedan en 2.5. Continúan límites de snapshot, TOCTOU, GUC y advertencia TypeORM/pg. Ningún resultado de persistencia/prototipo se presenta como prueba de Guards empresariales.
+
 - Referencias verificadas: [VACUUM PostgreSQL 18](https://www.postgresql.org/docs/18/sql-vacuum.html), [materialización de CTE](https://www.postgresql.org/docs/18/queries-with.html), [adquisición/liberación de conexiones pg-pool](https://node-postgres.com/apis/pool). Runbook detalla mediciones y recuperación.
 
 ## ADR-041 — Evaluación RBAC efectiva y lectura HTTP transaccional (2.4, 2026-10-27)
 
 - Base aprobada definitivamente 9ab081078d9504f47ac841a7b8acdd5b44296876. Alcance 2.4: E-1 primero, luego implementación de authorization.access@1 y ruta técnica real. Sin administración RBAC, delegación, invitaciones, módulos comerciales, SUBTREE, caché global, extensiones ni despliegues. Firmas y tipos públicos v1 se conservan; solo se registra el proveedor antes ausente.
+
 - E-1: migración 12 IndexableIdentityTenantRls1793124000000, aditiva y transaccional, altera 14políticas app existentes (Membership SELECT/RESTRICTIVE, directorio SELECT/RESTRICTIVE y cinco pares Organizations). Compara columnas UUID contra CASE de GUC validado y convertido a UUID; nunca columna::text. Contexto ausente/vacío/malformado falla cerrado, sin 22P02. Conserva roles/ACL, SELECT permisivas acotadas, RESTRICTIVE, WITH CHECK(false), ENABLE/FORCE y políticas operativas. No funciones privilegiadas ni SECURITY DEFINER/BYPASSRLS. Down restaura las expresiones históricas únicamente en ciclos descartables; migraciones 1–11 no se editan.
+
 - E-1 se verificó antes del evaluador: schema 11 poblado con 20.000 membresías, mismas filas/denegaciones antes/después y revert/reapply, diagnóstico sin hallazgos. Antes Seq Scan con 19.999 filas descartadas; después Index Scan ix_membership_identity_status con UUID como Index Cond, sin hints/umbrales temporales. Las14definiciones están contrastadas con pg_policies, y las 93 pruebas PostgreSQL anteriores pasaron sobre schema 12 antes de iniciar E-2. SQL de políticas por texto descompilado sigue siendo una dependencia de diagnóstico controlada mediante pruebas.
+
 - Contexto: IdentityVerifier marca mediante WeakSet privado únicamente el Principal devuelto tras JWT/JWKS válido; AuthenticationGuard lo asigna al request. AuthorizationReads rechaza clones/DTOs, no llama resolve/alta, y usa TenantReadTransactions/IdentityReadTransactions para localizar Identity existente, Membership ACTIVE y Tenant/grupo disponibles en una sola transacción REPEATABLE READ/READ ONLY app. Extender el callback interno con identityId como tercer argumento es compatible con consumidores anteriores de dos argumentos. No identityId/membershipId/claims empresariales aceptados desde HTTP.
+
 - El contexto v1 conserva identityId/tenantId/manager públicos tipados, pero requiere procedencia privada no serializable y vigencia del callback en runtime. Manager no enumerable, contexto congelado; se verifica DataSource exacto, transacción activa, RR/read-only, GUC de identidad/tenant y marca rol app. Se invalida al salir por commit/error/rollback; no manager/contexto guardado en singletons o entre requests. Copiar campos no confiere autoridad. Los operadores no pueden usarse para evaluación; sus credenciales no llegan a API/BFF.
+
 - Propiedad: Memberships provee la relación concreta de pertenencia ACTIVE y Organizations la relación de unidades/ancestros disponibles, con SQL propiedad de cada módulo. Authorization compone esos contratos de lectura nativos para mantener la consulta agrupada y un único EntityManager; no se concede acceso SQL nuevo ni se permite a módulos comerciales consultar tablas privadas ajenas. Parámetros y columnas de esos contratos son explícitos, no un framework SQL/UoW. La proyección Company pertenece a Organizations y solo expone id/name. Adaptación a módulos externos pendiente de extensibilidad, sin transportar manager ni confiar en DTO remoto.
+
 - E-2: can usa lookup de Permission y CASE/EXISTS puntual por tenant/membership/scope_type/scope_unit_id, con filtro RoleAssignment/Role/RolePermission ACTIVE y disponibilidad real. No materializa todas las asignaciones para can. Permission DEPRECATED conocido devuelve NO_GRANT; desconocido UNKNOWN_PERMISSION interno. HTTP no expone esas diferencias. permissionsFor/scopesFor usan conjuntos MATERIALIZED y agregación/deduplicación en una consulta de datos; una consulta adicional constante verifica contexto, sin N+1 por rol/unidad. Código de permiso, UUID y tipo se validan antes de SQL parametrizado.
+
 - Predicados efectivos: identidad autenticada/local, Membership y Tenant ACTIVE, grupo/OU GROUP ACTIVE, concesiones/rol/permiso vigentes, scope y todos sus ancestros ACTIVE en jerarquía fija GROUP→COMPANY→BRANCH. Default deny, grant-only, scopes exactos, ninguna herencia GROUP→COMPANY/BRANCH ni COMPANY→BRANCH. Rol INACTIVE y concesiones ACTIVE históricas es estado válido pero DENY (D-7); no borrar/revocar historia para simularlo. uq_role_tenant_name continúa reservando nombre incluso INACTIVE.
+
 - Snapshot: autorización y lectura efectiva deben compartir transacción. Nuevas transacciones reflejan revocaciones confirmadas; una ya iniciada conserva su snapshot RR dentro de timeouts. No llamadas HTTP a Keycloak dentro de DB, ni validar en una conexión para conceder en otra. Membership revocada invalida la siguiente evaluación aunque catalog_version/tenant_revision no cambien. No caché de decisiones entre requests; materialización vive solo en la sentencia/transacción actual. RLS aísla identidad/tenant, no implementa permisos por compañía dentro del tenant ni resiste SQL arbitrario que modifique GUC. NestJS sigue siendo responsable de autorización empresarial.
+
 - Ruta técnica GET /authorization/demo/tenants/:tenantId/companies/:unitId. RequireAccess fija foundation.probe.read y COMPANY en código confiable; AuthenticationGuard verifica access token y BusinessAuthorizationGuard ejecuta AuthorizationReads, can y proyección Organizations en el mismo callback/manager. Solo una proyección ya autorizada sale hacia el controller, sin relectura en otra conexión, RBAC interno, tax_id o tokens. Guard rechaza ausencia de metadata, body/query sustitutos de identidad y candidatos malformados. No se crean roles/memberships/tenants al login ni administradores; Control Center conserva su pantalla técnica.
+
 - Errores: JWT ausente/inválido 401; miembro válido sin concesión 403; contexto/recurso indisponible o ajeno 404 uniforme, y scopes no autorizados/inexistentes dentro de contexto válido 403 uniforme. No enviar SQLSTATE, políticas, trazas o existencia de datos ajenos. Contención/indisponibilidad 503 con Retry-After 1; conflictos de operaciones confiables siguen internos, sin endpoint administrativo nuevo que requiera 409. Cache-Control:no-store y correlationId validado/generado en header, cuerpo y evento seguro. Denegación normal no es 500; colecciones vacías no se marcan automáticamente como ataque. Permission DEPRECATED registra un evento agregado por request sin código/filas/identidades; ALS de telemetría no almacena managers ni decisiones.
+
 - E-3: oráculo SQL de ADR-040 conservado sin modificar sus consultas; pruebas comparan conjuntos completos ordenados de permisos/scopes y coherencia can para scopes devueltos. Múltiples roles no duplican resultados. Se prueban contexts falsos/expirados, origen DataSource, rollback/pool físico, estados/revocaciones/ancestros, no herencia, UUID malformado, tenant/membership ajenos y query count constante. Fixtures PostgreSQL/benchmark usan JWT firmados con JWKS descartable real (sin fabricar el marcador Principal); suites HTTP/OIDC usan Keycloak real, Node/Nest real y Chromium existente, sin bypasses RLS.
+
 - E-4: mismo generador 500 tenants / 50.000 asignaciones sesgadas,20 / 420 asignaciones de membership pequeña/grande, VACUUM(ANALYZE) y roles reales. Benchmark ejecuta los métodos definitivos y guarda EXPLAIN completo de sus SQL, Index Cond/Filter/descartadas/loops/buffers/Heap Fetches, oráculo y revisiones.30 repeticiones tras3 warmups, p50/p95 de método y transacción completa; incluye primera observación después de carga/VACUUM/planes de referencia, **no frío real ni flush de caché OS/PostgreSQL**. Números locales Windows/Docker/PG18.6 no son SLA y no se comparan temporalmente como si fueran consultas/preparación idénticas. can utiliza assignment_member_scope bajo carga representativa; no se exige un índice concreto para cualquier tabla pequeña. El benchmark pesado permanece fuera de CI ordinaria.
+
 - Deuda: D-4 queda resuelto por E-1; D-7 implementado/denegado. N-1 cerrado y conservado; N-3 formaliza ADD CONSTRAINT NOT VALID + VALIDATE para CHECK/FK añadidos a tablas pobladas cuando corresponda y PostgreSQL admita, nunca PK/UNIQUE. D-5 permanece abierto: responsable Authorization/Platform Core, supervisión Director técnico/Auditor, fecha objetivo incremento 2.5 **antes del cierre de Fase 2**; compatibilidad de huellas históricas antes de cambiar CURRENT_FINGERPRINT_VERSION. A-2/aislamiento del operador Organizations, reparación auditada de tenant_directory, instalación desde cero reproducible y pruebas adversariales integrales permanecen en 2.5. Riesgos de GUC/snapshot y aviso TypeORM/pg conservados. No comenzar 2.5 sin revisión.
+
 - Referencias oficiales verificadas: [políticas PostgreSQL 18](https://www.postgresql.org/docs/18/sql-createpolicy.html), [snapshot RR](https://www.postgresql.org/docs/18/transaction-iso.html), [EXPLAIN](https://www.postgresql.org/docs/18/using-explain.html), [materialización CTE](https://www.postgresql.org/docs/18/queries-with.html). Sin dependencias nuevas.

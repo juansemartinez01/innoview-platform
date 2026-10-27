@@ -1,6 +1,12 @@
 # Innoview Platform
 
-Fases 0 y 1 cerradas; **2.4 aprobado en `07f6b59258306bf67074b402cd71145707c83283`**. El incremento **2.5** endurece procedencia, operadores y recuperación. Fase 2 permanece pendiente de revisión del Director técnico y Auditor. No se inicia administración delegada ni Fases 3/4.
+## Asignación delegada — 3.1 / ADR-043
+
+Fases 0, 1 y 2 oficialmente cerradas; base aprobada `753def7f665ca979af21a799ad72d52fde7c1ad9`. Solo 3.1 autorizado, pendiente de revisión final. `POST /admin/role-assignments` asigna un rol existente bajo JWT verificado, autoridad exacta y contención SQL al INSERT/commit. No administración de roles ni invitaciones.
+
+Agregar `DB_AUTHORIZATION_DELEGATION_USER/PASSWORD` independientes en `.env`; detener escritores, ejecutar `pnpm db:provision`, `pnpm db:run`, `pnpm db:provision`, `pnpm db:diagnose` y reiniciar API. Migración 15 aditiva, sin borrar volúmenes. API recibe app + delegado; Portal/Control Center conservan aislamiento y no reciben la credencial nueva. Detalles, contrato HTTP, bootstrap explícito y matriz de riesgos: [DELEGATION_3_1.md](docs/DELEGATION_3_1.md). `pnpm authorization:technical` prepara el rol y ejecuta GRANT_TENANT_ADMIN fuera de HTTP.
+
+Antecedente 2.5: fases 0 y 1 cerradas; **2.4 aprobado en `07f6b59258306bf67074b402cd71145707c83283`**. El incremento **2.5** endurece procedencia, operadores y recuperación. Fase 2 permanece pendiente de revisión del Director técnico y Auditor. No se inicia administración delegada ni Fases 3/4.
 
 ## Hardening y recuperación — 2.5
 

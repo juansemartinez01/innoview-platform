@@ -94,6 +94,10 @@ export class AuthorizationOperationRecord {
   fingerprintVersion!: number;
   @Column('text') actor!: string;
   @Column({ name: 'actor_type', type: 'text' }) actorType!: string;
+  @Column({ name: 'actor_membership_id', type: 'uuid', nullable: true })
+  actorMembershipId!: string | null;
+  @Column({ name: 'actor_user_identity_id', type: 'uuid', nullable: true })
+  actorUserIdentityId!: string | null;
   @Column('text') reason!: string;
   @Column({ name: 'technical_source', type: 'text' }) technicalSource!: string;
   @Column({ type: 'jsonb', nullable: true }) result!: unknown;
@@ -116,6 +120,10 @@ export class AuthorizationAuditEvent {
   @Column({ name: 'new_status', type: 'text' }) newStatus!: string;
   @Column('text') actor!: string;
   @Column({ name: 'actor_type', type: 'text' }) actorType!: string;
+  @Column({ name: 'actor_membership_id', type: 'uuid', nullable: true })
+  actorMembershipId!: string | null;
+  @Column({ name: 'actor_user_identity_id', type: 'uuid', nullable: true })
+  actorUserIdentityId!: string | null;
   @Column('text') reason!: string;
   @Column({ name: 'technical_source', type: 'text' }) technicalSource!: string;
   @Column({ name: 'db_actor', type: 'text' }) dbActor!: string;

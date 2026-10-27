@@ -1,3 +1,4 @@
+import { verifyDelegationHttp } from './delegation-http.checks.mjs';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import {
@@ -63,6 +64,7 @@ export async function verifyAccessHttp(
         identity: (await response.json()).id,
       });
     }
+    await verifyDelegationHttp(t, { env, users, writer, orgs, members });
     const tenant = await orgs.createTenant(
         'HTTP effective tenant',
         'HTTP effective group',

@@ -17,6 +17,11 @@ import { UserIdentity } from '../identity/user-identity.entity.js';
 @Index('ix_membership_identity_status', ['userIdentityId', 'status'])
 @Unique('uq_membership_tenant_identity', ['tenantId', 'userIdentityId'])
 @Unique('uq_membership_tenant_id', ['tenantId', 'id'])
+@Unique('uq_membership_tenant_id_identity', [
+  'tenantId',
+  'id',
+  'userIdentityId',
+])
 @Check(
   'ck_membership_state',
   "(status='ACTIVE' AND revoked_at IS NULL AND revoked_by IS NULL AND revoked_reason IS NULL) OR (status='REVOKED' AND revoked_at IS NOT NULL AND revoked_by IS NOT NULL AND revoked_reason IS NOT NULL AND length(btrim(revoked_by))>0 AND length(btrim(revoked_reason))>0)",

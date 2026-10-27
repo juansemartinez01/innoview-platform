@@ -22,7 +22,7 @@ Migraciones nuevas13/14: OrganizationOperationalBoundaries1793131200000 y Direct
 
 Organizations ordinario no crea Tenant y se limita al tenant LOCAL en las ocho tablas anteriores. Pretenant no puede crear Company/Branch o cambiar estados. Mantenimiento no escribe fuentes ni lee Company/Branch: modifica solo la proyección bajo ledger y sus registros técnicos. App/BFF no adquieren acceso a operadores, ledgers o catálogo de escritura. Bootstrap y migrador siguen separados. Matriz completa y límites de confianza: SECURITY_AND_RECOVERY.md/ADR-042.
 
-El gate transaccional se adquiere en wrapper y trigger anterior a los demás, antes de locks de fila. Repair READ COMMITTED compara después de esperar; evita snapshot previo a la espera e inversión de locks. Cada nueva solicitud empresarial sigue necesitando evaluación dentro de su transacción; FK y RLS tenant no son RBAC por compañía para SQL arbitrario.
+Corrección G-1 de 3.1: el wrapper adquiere el gate antes de sus locks explícitos. El trigger BEFORE ROW precede otros triggers, pero PostgreSQL puede adquirir el lock de fila UPDATE antes de invocarlo; SQL directo puede invertir el orden frente a reparación. Timeout/rollback deben abortar sin efectos parciales. Repair READ COMMITTED compara después de esperar, evitando el snapshot previo a la espera. Cada nueva solicitud empresarial sigue necesitando evaluación en su transacción; FK y RLS tenant no son RBAC por compañía para SQL arbitrario.
 
 ## Verificaciones ejecutadas
 

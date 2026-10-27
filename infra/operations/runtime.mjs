@@ -4,7 +4,15 @@ import { spawn } from 'node:child_process';
 import { technicalEnvironment } from './environment.mjs';
 import { fileURLToPath } from 'node:url';
 const [purpose, ...args] = process.argv.slice(2);
-if (!['provision-tenant', 'directory', 'backup', 'diagnose'].includes(purpose))
+if (
+  ![
+    'provision-tenant',
+    'directory',
+    'backup',
+    'diagnose',
+    'authorization-bootstrap',
+  ].includes(purpose)
+)
   throw new Error('Unknown technical operation');
 const file = await readFile(new URL('../../.env', import.meta.url), 'utf8')
   .then(parseEnv)
@@ -19,11 +27,13 @@ const child = spawn(
   [
     fileURLToPath(
       new URL(
-        purpose === 'backup'
-          ? './backup.cli.mjs'
-          : purpose === 'diagnose'
-            ? '../../apps/api/dist/persistence/diagnostics.cli.js'
-            : '../../apps/api/dist/organizations/operations.cli.js',
+        purpose === 'authorization-bootstrap'
+          ? '../../apps/api/dist/authorization/bootstrap.cli.js'
+          : purpose === 'backup'
+            ? './backup.cli.mjs'
+            : purpose === 'diagnose'
+              ? '../../apps/api/dist/persistence/diagnostics.cli.js'
+              : '../../apps/api/dist/organizations/operations.cli.js',
         import.meta.url,
       ),
     ),

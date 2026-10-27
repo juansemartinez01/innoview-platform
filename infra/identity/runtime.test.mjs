@@ -140,6 +140,8 @@ await test(
       DB_AUTHORIZATION_PASSWORD: secret(),
       DB_ORGANIZATIONS_PROVISIONER_USER: `test_org_provisioner_${suffix}`,
       DB_ORGANIZATIONS_PROVISIONER_PASSWORD: secret(),
+      DB_AUTHORIZATION_DELEGATION_USER: `test_delegation_${suffix}`,
+      DB_AUTHORIZATION_DELEGATION_PASSWORD: secret(),
       DB_DIRECTORY_MAINTENANCE_USER: `test_directory_${suffix}`,
       DB_DIRECTORY_MAINTENANCE_PASSWORD: secret(),
       PORTAL_COOKIE_PASSWORD: secret(),
@@ -1334,6 +1336,7 @@ await test(
           'DB_AUTHORIZATION_USER',
           'DB_ORGANIZATIONS_PROVISIONER_USER',
           'DB_DIRECTORY_MAINTENANCE_USER',
+          'DB_AUTHORIZATION_DELEGATION_USER',
         ])
           await bootstrap.query(`DROP ROLE ${pg.escapeIdentifier(env[key])}`);
       }

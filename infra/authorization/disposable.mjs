@@ -5,6 +5,7 @@ import {
   createDataSource,
   initializeApplicationDataSource,
   initializeAuthorizationOperatorDataSource,
+  initializeAuthorizationDelegationDataSource,
   initializeMembershipOperatorDataSource,
   initializeOrganizationsOperatorDataSource,
   initializeOrganizationsProvisionerDataSource,
@@ -43,6 +44,7 @@ export async function disposableAuthorization(
     'authorization',
     'organizations_provisioner',
     'directory_maintenance',
+    'authorization_delegation',
   ]) {
     env[`DB_${purpose.toUpperCase()}_USER`] =
       `bench_${purpose.slice(0, 18)}_${suffix}`;
@@ -77,6 +79,7 @@ export async function disposableAuthorization(
     for (const [kind, initialize] of Object.entries({
       app: initializeApplicationDataSource,
       authorization: initializeAuthorizationOperatorDataSource,
+      delegation: initializeAuthorizationDelegationDataSource,
       membership: initializeMembershipOperatorDataSource,
       organizations: initializeOrganizationsOperatorDataSource,
       provisioner: initializeOrganizationsProvisionerDataSource,
@@ -103,6 +106,7 @@ export async function disposableAuthorization(
           'authorization',
           'organizations_provisioner',
           'directory_maintenance',
+          'authorization_delegation',
         ])
           await admin.query(
             `DROP ROLE IF EXISTS ${pg.escapeIdentifier(env[`DB_${purpose.toUpperCase()}_USER`])}`,

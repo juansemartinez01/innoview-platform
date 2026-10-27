@@ -8,6 +8,7 @@ export type DatabasePurpose =
   | 'membership'
   | 'organizations'
   | 'authorization'
+  | 'authorization_delegation'
   | 'organizations_provisioner'
   | 'directory_maintenance';
 

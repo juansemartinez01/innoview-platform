@@ -1,5 +1,11 @@
 # Seguridad operativa y recuperación — 2.5
 
+## Addendum vigente 3.1 / ADR-043
+
+Fase 2 aprobada; la API incorpora un pool authorization_delegation independiente de app y de operadores técnicos. Solo INSERT de asignación, pending/finalización de ledger, auditoría y revisión derivadas; sin UPDATE delegado de asignaciones ni composición/catálogo/sesiones/repair. Lecturas propietarias con columnas mínimas y RLS específicas. BFF/Portal/Control Center excluyen la nueva pareja. Launchers no son sandbox OS; aislar físicamente secretos/procesos en futuros despliegues.
+
+La auditoría une actor humano y Membership por FK compuesta. GUC no autentica al actor ante SQL arbitrario con la credencial. Contención al INSERT/commit no garantiza composición eterna de roles compartidos (H-2 bloqueante futuro). Retención sin borrado que permita reutilizar requestId. Backup/restore debe conservar procedencia humana y remapear todas las policies a los nuevos roles independientes. [Contrato y matriz de riesgos 3.1](DELEGATION_3_1.md).
+
 Contrato vigente: ADR-042 y OPERATIONS_RUNBOOK.md. Solo desarrollo y ensayos descartables; no instalación productiva ni recuperación PITR.
 
 ## Actores y credenciales
@@ -38,7 +44,7 @@ Backup usa pg_dump custom sin ownership/ACL ni contraseñas de roles, con SHA-25
 
 La prueba restaura con pg_restore en otra base generada, nunca `--clean` sobre una existente. Aprovisiona roles nuevos, restaura objetos bajo migrador, remapea policies a roles nuevos, reconcilia ACL y ajusta el nombre físico en metadata TypeORM. Conserva actor/resultado/historia, valida constraints/migraciones/schema diff/diagnóstico y prueba lectura HTTP autorizada. Los secretos de roles y claves BFF se gestionan separadamente: pg_dump no respalda roles globales, Keycloak ni claves externas. No prometer recuperación de sesiones/SSO tras pérdida de esas claves o del IdP.
 
-Repair exige backup real verificable y confirmación explícita. Gate por tenant antes de locks de fila en servicios y triggers; READ COMMITTED compara después de adquirirlo. No desactiva RLS/triggers/constraints. Pending ledger, proyección y auditoría son atómicos. Error implica rollback; un repair confirmado solo admite compensación autorizada con nuevo request/backup y auditoría, nunca borrar eventos ni restaurar una proyección contradictoria con su fuente. Corregir primero la fuente mediante su contrato si estaba equivocada.
+Repair exige backup real verificable y confirmación explícita. G-1: gate por tenant antes de locks de fila en el wrapper; BEFORE ROW no garantiza ese orden para UPDATE directo (el lock de fila puede preceder al trigger); READ COMMITTED compara después de adquirirlo. No desactiva RLS/triggers/constraints. Pending ledger, proyección y auditoría son atómicos. Error implica rollback; un repair confirmado solo admite compensación autorizada con nuevo request/backup y auditoría, nunca borrar eventos ni restaurar una proyección contradictoria con su fuente. Corregir primero la fuente mediante su contrato si estaba equivocada.
 
 La comparación FULL OUTER JOIN detecta sobrantes. Con FK/completitud actuales no se puede fabricar uno legítimamente: la suite verifica restricciones y no las desactiva para inventar cobertura. La inyección de faltantes/valores incorrectos usa la credencial de mantenimiento en una base descartable y registra sus cambios como fixture, sin tocar datos habituales.
 

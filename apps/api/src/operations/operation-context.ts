@@ -34,11 +34,26 @@ export async function establishOperationContext(
   value: OrganizationOperation,
   tenantId?: string,
 ) {
+  const operation = technicalOperation(value);
+  return establishOperationLocals(manager, namespace, operation, tenantId);
+}
+// Shared transport of an already validated contract; no credential selection.
+// Human callers use delegatedOperation, never technicalOperation.
+export async function establishOperationLocals(
+  manager: EntityManager,
+  namespace: 'organizations' | 'authorization',
+  operation: {
+    actor: string;
+    actorType: string;
+    reason: string;
+    requestId: string;
+  },
+  tenantId?: string,
+) {
   if (!manager.queryRunner?.isTransactionActive)
     throw new Error('Active operation transaction required');
-  const operation = technicalOperation(value);
-  if (namespace === 'authorization' && !canonicalUuid(tenantId))
-    throw new Error('Canonical tenant required');
+  if (!canonicalUuid(tenantId) || !canonicalUuid(operation.requestId))
+    throw new Error('Canonical tenant and request required');
   const prefix =
     namespace === 'organizations'
       ? 'innoview.organization_'

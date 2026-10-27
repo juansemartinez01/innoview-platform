@@ -1,5 +1,11 @@
 # Operaciones técnicas y diagnóstico — contrato vigente 2.5
 
+## Contrato vigente 3.1 — ADR-043
+
+Fase 2 aprobada en 753def7f665ca979af21a799ad72d52fde7c1ad9; exclusivamente 3.1 autorizado. [Procedimiento de actualización, bootstrap, ACL y riesgos](DELEGATION_3_1.md). La nueva pareja DB_AUTHORIZATION_DELEGATION_* debe ser independiente y solo se entrega al pool delegado de API. El launcher técnico authorization:technical conserva las credenciales propietarias separadas; ningún operador global llega a HTTP/BFF. No activar administración por login.
+
+No revertir migración 15 sobre historial humano: down lo rechaza. Usar migración correctiva hacia adelante; no borrar ledger/auditoría ni volúmenes. authorization.operation no tiene TTL y preserva requestId global; un archivado futuro requiere integridad, búsqueda de incidentes y prevención durable de reutilización. Antes de actualizar detener escritores, backup confiable fuera del repo, provision→run→provision→diagnose, reiniciar y verificar salud. Las instrucciones históricas inferiores solo se aplican donde ADR-043 no las sustituye.
+
 ## 2.5 — orden de actualización y responsabilidades
 
 Base 2.4 aprobada `07f6b59258306bf67074b402cd71145707c83283`; 2.5 pendiente de revisión humana. ADR-042 y SECURITY_AND_RECOVERY.md tienen precedencia sobre procedimientos históricos de abajo. No cerrar oficialmente Fase 2 ni iniciar administración delegada.
@@ -41,7 +47,7 @@ pnpm directory:maintain --confirm-repair --tenant "<tenant UUID>" --actor "opera
 
 Sin confirmación no escribe. Diagnóstico devuelve UUID/tipos de diferencia solo al operador local, no datos empresariales o HTTP. Repair necesita archivo custom real PGDMP y SHA/manifiesto coincidente con host/puerto/base; no basta un string de hash. Elegir backup confiable, revisar/restaurar en ensayo antes de intervención y conservarlo con ACL privadas. La herramienta de backup soporta solo contenedores locales documentados; en fixtures admite `--project innoview-platform-test --service postgres-test` o el proyecto limpio generado. No es backup/PITR productivo ni incluye Keycloak, roles globales o claves BFF.
 
-Ledger propio y eventos guardan actor/tipo/motivo/request, hash de backup, estados antes/después y rol DB. Repair es READ COMMITTED, adquiere gate de escritura del tenant antes de comparar y vuelve a diagnosticar; el gate también se aplica en triggers antes de locks de fila. Fuente estable tras la espera, sin UPDATE sobre fuentes ni locks globales/credenciales migradoras. Timeout revierte todo. Un replay equivalente devuelve resultado histórico sin otro evento; no es una lectura de salud actual: ejecutar diagnóstico nuevo después.
+Ledger propio y eventos guardan actor/tipo/motivo/request, hash de backup, estados antes/después y rol DB. Repair es READ COMMITTED, adquiere gate de escritura del tenant antes de comparar y vuelve a diagnosticar; el gate también se aplica en BEFORE ROW, pero UPDATE directo puede adquirir el lock de fila antes del trigger (G-1). Fuente estable tras la espera, sin UPDATE sobre fuentes ni locks globales/credenciales migradoras. Timeout revierte todo. Un replay equivalente devuelve resultado histórico sin otro evento; no es una lectura de salud actual: ejecutar diagnóstico nuevo después.
 
 La comparación detecta faltantes, errores y sobrantes; las FK actuales impiden insertar sobrantes válidos y las pruebas no las desactivan. Si la fuente está incompleta, la reparación se rechaza. No inventar estructura ni modificar tablas autoritativas desde el mantenedor. Una reparación confirmada no se borra: corregir fuente por su contrato si corresponde y realizar compensación autorizada con nuevo backup/request y evidencia. Nunca eliminar auditorías ni restaurar una proyección incorrecta para simular rollback.
 

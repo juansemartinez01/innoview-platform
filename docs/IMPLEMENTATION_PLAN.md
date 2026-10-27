@@ -1,5 +1,11 @@
 # Plan de implementación — Foundation MVP
 
+## Estado vigente — Fase 3, exclusivamente 3.1
+
+Dirección cerró Fase 2 sobre `753def7f665ca979af21a799ad72d52fde7c1ad9`. 3.1 implementa asignación de rol existente: Option C, procedencia humana, contención, bootstrap CLI y pruebas adversariales. Aceptación pendiente de revisión, sin iniciar 3.2/3.3 ni Fase 4. [Contrato y matriz](DELEGATION_3_1.md).
+
+G-4 (directorio por tenant), G-5 (backup streaming) y G-9 (deduplicación permissionsFor medida) se programan para 3.2, con tests específicos y sus propietarios. G-3/G-6/G-8 permanecen informativos. H-2 bloquea composición delegada en 3.2/3.3 hasta resolver elevación indirecta de roles compartidos. G-1 corrige orden BEFORE ROW/UPDATE; G-2 rechaza llave NULL; G-7 exige evidencia SHA/run reales. No se implementan esas optimizaciones generales en 3.1.
+
 ## Estado actual — 2.5
 
 2.4 aprobado sobre `07f6b59258306bf67074b402cd71145707c83283`. Se autoriza exclusivamente 2.5. Etapas internas: baseline adversarial; F-1/D-5; A-2 y repair; recuperación/instalación limpia/benchmark F-6; regresión y revisión. La Fase 2 permanece pendiente de aceptación humana; no se inicia Fase 3/4.

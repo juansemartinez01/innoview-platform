@@ -1,3 +1,9 @@
+import {
+  AUTHORIZATION_DELEGATION_SOURCE,
+  DelegatedAssignments,
+  DelegatedAssignmentsController,
+} from './delegation.js';
+import { initializeAuthorizationDelegationDataSource } from '../persistence/data-sources.js';
 import { Module } from '@nestjs/common';
 import { PersistenceModule } from '../persistence/persistence.module.js';
 import { AuthorizationService } from './authorization.service.js';
@@ -23,6 +29,11 @@ import {
     OrganizationsModule,
   ],
   providers: [
+    {
+      provide: AUTHORIZATION_DELEGATION_SOURCE,
+      useFactory: () => initializeAuthorizationDelegationDataSource(),
+    },
+    DelegatedAssignments,
     AuthorizationService,
     AuthorizationReads,
     AuthorizationEvaluator,
@@ -30,6 +41,9 @@ import {
     CompanyDemonstrationGuard,
   ],
   exports: [AuthorizationService, AuthorizationReads, AUTHORIZATION_ACCESS_V1],
-  controllers: [AuthorizationDemonstrationController],
+  controllers: [
+    AuthorizationDemonstrationController,
+    DelegatedAssignmentsController,
+  ],
 })
 export class AuthorizationModule {}

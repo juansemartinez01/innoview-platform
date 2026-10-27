@@ -155,7 +155,7 @@ export async function verifyMembershipRls(
         >(
           "SELECT policyname,roles::text[] AS roles,cmd,permissive FROM pg_policies WHERE schemaname='memberships' AND tablename='membership'",
         );
-        assert.equal(policies.length, 5);
+        assert.equal(policies.length, 7);
         assert.ok(
           policies.every(
             (p) => p.roles.length === 1 && !p.roles.includes('public'),

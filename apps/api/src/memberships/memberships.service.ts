@@ -31,7 +31,23 @@ export class MembershipsService {
   constructor(@Inject(DataSource) private readonly source: DataSource) {}
   // Native transactional read contract; owner keeps SQL and active semantics.
   authorizationMembershipSql() {
-    return "SELECT id,tenant_id FROM memberships.membership WHERE tenant_id=$1 AND id=$2 AND user_identity_id=$3 AND status='ACTIVE'";
+    return authorizationMembershipSql();
+  }
+  async delegationTargetReference(
+    tenantId: string,
+    membershipId: string,
+    manager: EntityManager,
+  ) {
+    if (
+      manager.connection !== this.source ||
+      !manager.queryRunner?.isTransactionActive
+    )
+      throw new Error('Active local transaction required');
+    return manager.getRepository(Membership).existsBy({
+      tenantId: uuid(tenantId),
+      id: uuid(membershipId),
+      status: 'ACTIVE',
+    });
   }
   async authorizationMembership(
     tenantId: string,
@@ -238,4 +254,8 @@ export class MembershipsService {
       throw new MembershipOperationError('PERSISTENCE_UNAVAILABLE');
     }
   }
+}
+
+export function authorizationMembershipSql() {
+  return "SELECT id,tenant_id FROM memberships.membership WHERE tenant_id=$1 AND id=$2 AND user_identity_id=$3 AND status='ACTIVE'";
 }

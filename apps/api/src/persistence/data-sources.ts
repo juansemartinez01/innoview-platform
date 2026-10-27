@@ -15,6 +15,7 @@ export function createDataSource(
     | 'membership'
     | 'organizations'
     | 'authorization'
+    | 'authorization_delegation'
     | 'organizations_provisioner'
     | 'directory_maintenance',
   env: Environment = process.env,
@@ -31,20 +32,19 @@ export function createDataSource(
     password: config.password,
     ssl: config.ssl,
     connectTimeoutMS: config.connectionTimeoutMillis,
-    schema:
-      purpose === 'authorization'
-        ? 'authorization'
-        : [
-              'organizations',
-              'organizations_provisioner',
-              'directory_maintenance',
-            ].includes(purpose)
-          ? 'organizations'
-          : purpose === 'membership'
-            ? 'memberships'
-            : purpose === 'app'
-              ? 'foundation'
-              : 'platform_meta',
+    schema: ['authorization', 'authorization_delegation'].includes(purpose)
+      ? 'authorization'
+      : [
+            'organizations',
+            'organizations_provisioner',
+            'directory_maintenance',
+          ].includes(purpose)
+        ? 'organizations'
+        : purpose === 'membership'
+          ? 'memberships'
+          : purpose === 'app'
+            ? 'foundation'
+            : 'platform_meta',
     synchronize: false,
     migrationsRun: false,
     migrationsTransactionMode: 'all',
@@ -75,6 +75,7 @@ async function initializeRestrictedDataSource(
     | 'membership'
     | 'organizations'
     | 'authorization'
+    | 'authorization_delegation'
     | 'organizations_provisioner'
     | 'directory_maintenance',
   env: Environment = process.env,
@@ -168,4 +169,10 @@ export function initializeDirectoryMaintenanceDataSource(
   env: Environment = process.env,
 ) {
   return initializeRestrictedDataSource('directory_maintenance', env);
+}
+
+export function initializeAuthorizationDelegationDataSource(
+  env: Environment = process.env,
+) {
+  return initializeRestrictedDataSource('authorization_delegation', env);
 }

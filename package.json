@@ -14,12 +14,15 @@
     }
   },
   "scripts": {
+    "authorization:benchmark:delegation": "pnpm --filter @innoview/api build && node --env-file-if-exists=.env infra/authorization/benchmark.mjs --permissions-per-role=40 --delegation-only",
+    "authorization:technical": "pnpm --filter @innoview/api build && node infra/operations/runtime.mjs authorization-bootstrap",
     "dev": "turbo run dev",
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "lint": "eslint . --max-warnings=0",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
+    "test:runtime": "node --env-file-if-exists=.env --test --test-concurrency=1 infra/identity/runtime.test.mjs",
     "test": "pnpm -r --if-present test && pnpm --filter @innoview/identity-bff build && pnpm --filter @innoview/api build && node --env-file-if-exists=.env --test --test-concurrency=1 infra/api/environment.test.mjs infra/keycloak/oidc.test.mjs infra/identity/runtime.test.mjs infra/operations/recovery.test.mjs",
     "oidc:provision": "node --env-file-if-exists=.env infra/keycloak/cli.mjs provision",
     "oidc:check": "node --env-file-if-exists=.env infra/keycloak/cli.mjs check",

@@ -51,15 +51,7 @@ export class OrganizationsService {
   // Concrete native read capability. Parameters belong to the authorization
   // contract: tenant $1, exact type $5/unit $6. No private attributes exposed.
   authorizationUnitsSql(exact = false) {
-    return `SELECT u.tenant_id,u.id,u.type FROM organizations.organizational_unit u
-      JOIN organizations.tenant t ON t.id=u.tenant_id AND t.status='ACTIVE'
-      JOIN organizations.business_group g ON g.tenant_id=u.tenant_id
-      JOIN organizations.organizational_unit gu ON gu.tenant_id=g.tenant_id AND gu.id=g.id AND gu.type='GROUP' AND gu.status='ACTIVE'
-      LEFT JOIN organizations.branch b ON b.tenant_id=u.tenant_id AND b.id=u.id AND u.type='BRANCH'
-      LEFT JOIN organizations.company c ON c.tenant_id=u.tenant_id AND c.id=CASE WHEN u.type='COMPANY' THEN u.id ELSE b.company_id END
-      LEFT JOIN organizations.organizational_unit cu ON cu.tenant_id=c.tenant_id AND cu.id=c.id AND cu.status='ACTIVE'
-      WHERE u.tenant_id=$1 AND u.status='ACTIVE' ${exact ? 'AND u.type=$5 AND u.id=$6' : ''}
-      AND ((u.type='GROUP' AND u.id=g.id) OR (u.type IN ('COMPANY','BRANCH') AND cu.id IS NOT NULL AND c.business_group_id=g.id))`;
+    return authorizationUnitsSql(exact);
   }
   async authorizedCompanyProjection(
     tenantId: string,
@@ -549,4 +541,16 @@ export class OrganizationsService {
     }
     return read(manager);
   }
+}
+
+export function authorizationUnitsSql(exact = false) {
+  return `SELECT u.tenant_id,u.id,u.type FROM organizations.organizational_unit u
+      JOIN organizations.tenant t ON t.id=u.tenant_id AND t.status='ACTIVE'
+      JOIN organizations.business_group g ON g.tenant_id=u.tenant_id
+      JOIN organizations.organizational_unit gu ON gu.tenant_id=g.tenant_id AND gu.id=g.id AND gu.type='GROUP' AND gu.status='ACTIVE'
+      LEFT JOIN organizations.branch b ON b.tenant_id=u.tenant_id AND b.id=u.id AND u.type='BRANCH'
+      LEFT JOIN organizations.company c ON c.tenant_id=u.tenant_id AND c.id=CASE WHEN u.type='COMPANY' THEN u.id ELSE b.company_id END
+      LEFT JOIN organizations.organizational_unit cu ON cu.tenant_id=c.tenant_id AND cu.id=c.id AND cu.status='ACTIVE'
+      WHERE u.tenant_id=$1 AND u.status='ACTIVE' ${exact ? 'AND u.type=$5 AND u.id=$6' : ''}
+      AND ((u.type='GROUP' AND u.id=g.id) OR (u.type IN ('COMPANY','BRANCH') AND cu.id IS NOT NULL AND c.business_group_id=g.id))`;
 }

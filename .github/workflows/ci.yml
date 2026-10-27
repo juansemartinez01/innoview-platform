@@ -62,7 +62,7 @@ jobs:
         id: test_database
         run: docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
       - name: Run PostgreSQL and OIDC integration tests
-        run: pnpm test
+        run: pnpm security:matrix 3.1
       - name: Stop disposable PostgreSQL and Keycloak
         if: always() && steps.test_database.outcome != 'skipped'
         run: docker compose -f compose.test.yaml down

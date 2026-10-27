@@ -1,3 +1,4 @@
+import { verifyDelegation } from '../authorization/delegation.spec.js';
 import {
   organizationsDiagnosticFixture,
   organizationReadFixture,
@@ -87,6 +88,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     DB_AUTHORIZATION_PASSWORD: randomBytes(24).toString('hex'),
     DB_ORGANIZATIONS_PROVISIONER_USER: `test_org_provisioner_${suffix}`,
     DB_ORGANIZATIONS_PROVISIONER_PASSWORD: randomBytes(24).toString('hex'),
+    DB_AUTHORIZATION_DELEGATION_USER: `test_delegation_${suffix}`,
+    DB_AUTHORIZATION_DELEGATION_PASSWORD: randomBytes(24).toString('hex'),
     DB_DIRECTORY_MAINTENANCE_USER: `test_directory_${suffix}`,
     DB_DIRECTORY_MAINTENANCE_PASSWORD: randomBytes(24).toString('hex'),
     DB_MIGRATOR_PASSWORD: randomBytes(24).toString('hex'),
@@ -657,6 +660,11 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
       'real migration reverts and reapplies only in this disposable database',
       async () => {
         assert.match(database, /^innoview_test_[a-f0-9]{32}$/);
+        await migrator.undoLastMigration(); // delegation, no human history in this fixture
+        const [priorOperation] = await migrator.query<{ forced: boolean }[]>(
+          "SELECT c.relforcerowsecurity AS forced FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='authorization' AND c.relname='operation'",
+        );
+        assert.equal(priorOperation.forced, true);
         await migrator.undoLastMigration(); // directory repair, disposable only
         await migrator.undoLastMigration(); // operational boundaries, disposable only
         await migrator.undoLastMigration();
@@ -863,6 +871,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
         );
       },
     );
+    await verifyDelegation(t, app, migrator, env);
   } finally {
     if (app.isInitialized) await app.destroy();
     if (migrator.isInitialized) await migrator.destroy();
@@ -878,6 +887,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
           env.DB_AUTHORIZATION_USER!,
           env.DB_ORGANIZATIONS_PROVISIONER_USER!,
           env.DB_DIRECTORY_MAINTENANCE_USER!,
+          env.DB_AUTHORIZATION_DELEGATION_USER!,
         ])
           await bootstrap.query(
             `DROP ROLE IF EXISTS ${pg.escapeIdentifier(role)}`,

@@ -19,6 +19,7 @@ import { MembershipsService } from '../../apps/api/dist/memberships/memberships.
 import { OrganizationsService } from '../../apps/api/dist/organizations/organizations.service.js';
 import { repairDirectory } from '../../apps/api/dist/organizations/directory-repair.js';
 import { AuthorizationService } from '../../apps/api/dist/authorization/authorization.service.js';
+import { DelegatedAssignments } from '../../apps/api/dist/authorization/delegation.js';
 import {
   AuthorizationReads,
   AuthorizationEvaluator,
@@ -197,6 +198,80 @@ await test('Recovery: real pg_dump/pg_restore, supported audited directory repai
             ]),
             { differences: [] },
           );
+        },
+      );
+      let humanRequest;
+      await t.test(
+        'Delegation CLI bootstrap and human provenance survive the real backup/restore drill',
+        async () => {
+          const args = () => [
+            '--tenant',
+            tenant.tenant.id,
+            '--actor',
+            'fixture:innoview-bootstrap',
+            '--reason',
+            'Discardable audited bootstrap',
+            '--request-id',
+            randomUUID(),
+          ];
+          const admin = await technicalCli(env, 'authorization-bootstrap', [
+            'create-role',
+            ...args(),
+            '--name',
+            'Recovery initial administrator',
+            '--description',
+            'Fixture',
+          ]);
+          await technicalCli(env, 'authorization-bootstrap', [
+            'grant-permission',
+            ...args(),
+            '--role',
+            admin.result.id,
+            '--permission',
+            'authorization.assignment.grant',
+          ]);
+          const bootstrapArgs = [
+            'grant-admin',
+            ...args(),
+            '--membership',
+            membership.membership.id,
+            '--role',
+            admin.result.id,
+            '--scope-type',
+            'COMPANY',
+            '--scope-unit',
+            company.company.id,
+          ];
+          const first = await technicalCli(
+            env,
+            'authorization-bootstrap',
+            bootstrapArgs,
+          );
+          assert.deepEqual(
+            await technicalCli(env, 'authorization-bootstrap', bootstrapArgs),
+            first,
+          );
+          const targetPrincipal = await verifier.verify(
+            await issuer.token(randomUUID()),
+          );
+          const target = await services.identities.resolve(targetPrincipal);
+          const targetMember = await services.members.register(
+            tenant.tenant.id,
+            target.id,
+            operation(),
+          );
+          humanRequest = randomUUID();
+          const result = await new DelegatedAssignments(
+            sources.delegation,
+          ).assign(principal, tenant.tenant.id, {
+            requestId: humanRequest,
+            membershipId: targetMember.membership.id,
+            roleId: role.id,
+            scopeType: 'COMPANY',
+            scopeUnitId: company.company.id,
+            reason: 'Recovery human attribution',
+          });
+          assert.equal(result.status, 'ACTIVE');
         },
       );
       const before = await technicalCli(env, 'backup', [
@@ -405,6 +480,124 @@ await test('Recovery: real pg_dump/pg_restore, supported audited directory repai
           );
         },
       );
+      await t.test(
+        'G1: direct UPDATE can lock a row before BEFORE ROW gate; real repair and timeout roll back safely',
+        async () => {
+          let gateReady, releaseGate;
+          const ready = new Promise((resolve) => {
+            gateReady = resolve;
+          });
+          const release = new Promise((resolve) => {
+            releaseGate = resolve;
+          });
+          const factory = sources.maintenance.createQueryRunner.bind(
+            sources.maintenance,
+          );
+          sources.maintenance.createQueryRunner = (...args) => {
+            const runner = factory(...args),
+              query = runner.query.bind(runner);
+            runner.query = async (sql, ...params) => {
+              const result = await query(sql, ...params);
+              if (
+                sql.includes('pg_advisory_xact_lock') &&
+                sql.includes('organization-write:')
+              ) {
+                gateReady();
+                await release;
+              }
+              return result;
+            };
+            return runner;
+          };
+          const repair = repairDirectory(
+            sources.maintenance,
+            tenant.tenant.id,
+            operation(),
+            before.manifest,
+          );
+          const writer = sources.organizations.createQueryRunner();
+          const probe = sources.organizations.createQueryRunner();
+          try {
+            await ready;
+            await writer.connect();
+            await writer.startTransaction();
+            const op = operation();
+            // Intentionally omit the cooperative wrapper's advisory-first order.
+            await writer.query(
+              "SELECT set_config('innoview.tenant_id',$1,true),set_config('innoview.organization_request',$2,true),set_config('innoview.organization_actor',$3,true),set_config('innoview.organization_actor_type','SYSTEM',true),set_config('innoview.organization_reason',$4,true),set_config('lock_timeout','1s',true)",
+              [tenant.tenant.id, op.requestId, op.actor, op.reason],
+            );
+            await writer.query(
+              "INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source) VALUES($1,$2,'SET_STATUS',$3,$4,'SYSTEM',$5,'fixture:g1')",
+              [
+                op.requestId,
+                tenant.tenant.id,
+                '0'.repeat(64),
+                op.actor,
+                op.reason,
+              ],
+            );
+            const pending = writer.query(
+              "UPDATE organizations.organizational_unit SET status='INACTIVE' WHERE tenant_id=$1 AND id=$2",
+              [tenant.tenant.id, company.company.id],
+            );
+            const outcome = pending.then(
+              () => null,
+              (error) => error.code,
+            );
+            await pause(100);
+            await probe.connect();
+            await probe.startTransaction();
+            await probe.query(
+              "SELECT set_config('innoview.tenant_id',$1,true)",
+              [tenant.tenant.id],
+            );
+            await assert.rejects(
+              probe.query(
+                'SELECT id FROM organizations.organizational_unit WHERE tenant_id=$1 AND id=$2 FOR UPDATE NOWAIT',
+                [tenant.tenant.id, company.company.id],
+              ),
+              (error) => error.code === '55P03',
+            );
+            await probe.rollbackTransaction();
+            assert.equal(await outcome, '55P03');
+            await writer.rollbackTransaction();
+            releaseGate();
+            await repair;
+            assert.deepEqual(await diagnose(sources.maintenance), []);
+            await sources.organizations.transaction(async (manager) => {
+              await establishOperationContext(
+                manager,
+                'organizations',
+                operation(),
+                tenant.tenant.id,
+              );
+              assert.deepEqual(
+                await manager.query(
+                  'SELECT request_id FROM organizations.operation WHERE request_id=$1',
+                  [op.requestId],
+                ),
+                [],
+              );
+              const [unit] = await manager.query(
+                'SELECT status FROM organizations.organizational_unit WHERE tenant_id=$1 AND id=$2',
+                [tenant.tenant.id, company.company.id],
+              );
+              assert.equal(unit.status, 'ACTIVE');
+            });
+          } finally {
+            releaseGate();
+            sources.maintenance.createQueryRunner = factory;
+            if (writer.isTransactionActive) await writer.rollbackTransaction();
+            if (probe.isTransactionActive) await probe.rollbackTransaction();
+            await Promise.allSettled([
+              writer.release(),
+              probe.release(),
+              repair,
+            ]);
+          }
+        },
+      );
       const backup = await backupDatabase(env, directory);
       await disposableAuthorization(
         async ({ env: target, sources: restored }) => {
@@ -433,6 +626,29 @@ await test('Recovery: real pg_dump/pg_restore, supported audited directory repai
             [env.DB_NAME],
           );
           await provisionDatabase(target);
+          await restored.authorization.transaction(async (manager) => {
+            await establishOperationContext(
+              manager,
+              'authorization',
+              operation(),
+              tenant.tenant.id,
+            );
+            const [human] = await manager.query(
+              'SELECT actor_type,actor_user_identity_id,actor_membership_id FROM "authorization".operation WHERE request_id=$1',
+              [humanRequest],
+            );
+            assert.deepEqual(human, {
+              actor_type: 'USER_IDENTITY',
+              actor_user_identity_id: identity.id,
+              actor_membership_id: membership.membership.id,
+            });
+            const [audit] = await manager.query(
+              'SELECT actor_type,actor_user_identity_id,actor_membership_id FROM "authorization".audit_event WHERE operation_request_id=$1',
+              [humanRequest],
+            );
+            assert.deepEqual(audit, human);
+          });
+
           const recovered = compose(restored);
           await t.test(
             'Restore: exact ACL/RLS/FK/triggers, historical replay/audit and effective evaluation preserved',

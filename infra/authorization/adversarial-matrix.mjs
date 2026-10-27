@@ -2,12 +2,20 @@ import { stripVTControlCharacters } from 'node:util';
 // Runs the same real PostgreSQL/Keycloak/browser suite before and after hardening.
 // Store test names and outcomes only; driver output may contain sensitive data.
 import { spawn } from 'node:child_process';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, writeFile, appendFile } from 'node:fs/promises';
 import { execFileSync } from 'node:child_process';
 
 const phase = process.argv[2];
-if (!['before', 'after'].includes(phase))
-  throw new Error('Use before or after');
+if (!['before', 'after', '3.1'].includes(phase))
+  throw new Error('Use before, after or 3.1');
+const measuredCommit = execFileSync('git', ['rev-parse', 'HEAD'], {
+  encoding: 'utf8',
+}).trim();
+if (
+  process.env.GITHUB_ACTIONS === 'true' &&
+  process.env.GITHUB_SHA !== measuredCommit
+)
+  throw new Error('CI SHA differs from checked out commit');
 const command = process.platform === 'win32' ? 'cmd.exe' : 'pnpm';
 const child = spawn(
   command,
@@ -51,10 +59,20 @@ await writeFile(
   JSON.stringify(
     {
       phase,
+      ci:
+        process.env.GITHUB_ACTIONS === 'true'
+          ? {
+              sha: measuredCommit,
+              runId: process.env.GITHUB_RUN_ID,
+              url: `https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}`,
+            }
+          : null,
       measurementSource:
-        phase === 'before'
-          ? 'approved base before control changes'
-          : 'working tree at invocation; see CI run for published commit verification',
+        process.env.GITHUB_ACTIONS === 'true'
+          ? 'actual CI execution on checked out SHA'
+          : phase === 'before'
+            ? 'approved base before control changes'
+            : 'working tree at invocation; see CI run for published commit verification',
       baseCommit: execFileSync('git', ['rev-parse', 'HEAD'], {
         encoding: 'utf8',
       }).trim(),
@@ -80,3 +98,11 @@ console.info(
   }),
 );
 process.exitCode = cases.length > 0 ? (code ?? 1) : 1;
+
+if (process.env.GITHUB_STEP_SUMMARY)
+  await appendFile(
+    process.env.GITHUB_STEP_SUMMARY,
+    `
+3.1 matrix: ${cases.length} results, ${cases.filter((c) => !c.passed).length} failures, exit ${code}. Verified checkout SHA: ${measuredCommit}. Run: https://github.com/${process.env.GITHUB_REPOSITORY}/actions/runs/${process.env.GITHUB_RUN_ID}
+`,
+  );

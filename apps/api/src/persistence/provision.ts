@@ -1,4 +1,5 @@
 import pg from 'pg';
+import { grantDelegation } from './delegation-grants.js';
 import { connectionConfig, type Environment } from './connection.config.js';
 
 // Controlled bootstrap operation. No credentials or query text are logged.
@@ -15,7 +16,9 @@ export async function provisionDatabase(
   const authorization = connectionConfig('authorization', env);
   const provisioner = connectionConfig('organizations_provisioner', env);
   const maintenance = connectionConfig('directory_maintenance', env);
+  const delegation = connectionConfig('authorization_delegation', env);
   const configs = [
+    delegation,
     provisioner,
     maintenance,
     bootstrap,
@@ -28,6 +31,7 @@ export async function provisionDatabase(
     authorization,
   ];
   const runtime = [
+    delegation,
     provisioner,
     maintenance,
     app,
@@ -71,6 +75,7 @@ export async function provisionDatabase(
       [authorization, 'authorization'],
       [provisioner, 'organizations_provisioner'],
       [maintenance, 'directory_maintenance'],
+      [delegation, 'authorization_delegation'],
     ] as const) {
       const marker = `innoview:${bootstrap.database}:${kind}`;
       const existing = await client.query<{ marker: string | null }>(
@@ -102,6 +107,7 @@ export async function provisionDatabase(
     // Defaults apply only to new connections; migrate separately from runtime.
     for (const role of runtime) {
       const operational = [
+        delegation.user,
         provisioner.user,
         maintenance.user,
         membership.user,
@@ -240,7 +246,7 @@ export async function provisionDatabase(
       table_name: string;
       columns: string[];
     }>(
-      "SELECT n.nspname AS schema_name,c.relname AS table_name,array_agg(a.attname::text ORDER BY a.attnum) AS columns FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid WHERE n.nspname IN ('organizations','memberships','authorization') AND c.relkind='r' AND a.attnum>0 AND NOT a.attisdropped GROUP BY n.nspname,c.relname",
+      "SELECT n.nspname AS schema_name,c.relname AS table_name,array_agg(a.attname::text ORDER BY a.attnum) AS columns FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid WHERE n.nspname IN ('identity','organizations','memberships','authorization') AND c.relkind='r' AND a.attnum>0 AND NOT a.attisdropped GROUP BY n.nspname,c.relname",
     );
     for (const row of columns.rows)
       await client.query(
@@ -425,6 +431,14 @@ export async function provisionDatabase(
         `GRANT UPDATE(result,completed_at) ON organizations.directory_repair_operation TO ${q(maintenance.user)}`,
       );
     }
+    const delegated = await client.query<{ object: string | null }>(
+      `SELECT to_regprocedure('"authorization".delegation_allowed(uuid,uuid,uuid,uuid,text,uuid,uuid)') AS object`,
+    );
+    if (delegated.rows[0].object)
+      await grantDelegation(
+        { query: async (sql: string) => client.query(sql) },
+        delegation.user,
+      );
     await client.query('COMMIT');
   } catch {
     // Never emit PostgreSQL errors: DDL errors may contain password literals.

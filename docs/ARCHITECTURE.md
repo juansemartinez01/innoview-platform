@@ -1,5 +1,11 @@
 # Arquitectura técnica — v0.3
 
+## Delegación acotada — contrato vigente 3.1 / ADR-043
+
+Fase 2 oficialmente cerrada en 753def7f665ca979af21a799ad72d52fde7c1ad9. POST /admin/role-assignments compone JWT verificado, Identity existente y contratos mínimos Memberships/Organizations con un pool delegado independiente. App y lectores RR/read-only no cambian. La transacción READ COMMITTED y la revisión por tenant protegen ledger/asignación/auditoría; triggers invocantes comprueban autoridad y contención exacta al INSERT y commit. El controller devuelve solamente el resultado. Contrato y límites H-1/H-2/H-3/H-4: [DELEGATION_3_1.md](DELEGATION_3_1.md).
+
+Asignar un rol no permite editarlo ni conceder authorization.*. Administrador inicial mediante CLI técnica explícita, nunca login ni selección de tenant. No invitaciones, revocación HTTP, composición delegada ni UI administrativa. Apartados inferiores son antecedentes; ADR-043 sustituye únicamente los cambios expresos de 3.1.
+
 ## Fronteras y recuperación — contrato vigente 2.5 / ADR-042
 
 2.4 aprobado en 07f6b59258306bf67074b402cd71145707c83283. 2.5 permanece sujeto a revisión, sin cierre oficial ni administración delegada.
@@ -10,7 +16,7 @@ Organizations ordinario queda tenant-scoped en sus ocho tablas previas, con fron
 
 Directory maintenance es una capacidad aislada de diagnóstico/recuperación, con lectura explícita de fuentes mínimas del directorio e historial técnico; sin lectura Company/Branch, DML sobre fuentes o acceso a otros módulos/sesiones. Solo escribe tenant_directory y sus registros propios de reparación bajo operación pendiente, contexto tenant y triggers invocantes. La lectura global de diagnóstico es una excepción deliberada, inaccesible al escritor ordinario/API/BFF. No RLS bypass ni SECURITY DEFINER.
 
-Un gate asesor transaccional por tenant precede locks de fila tanto en el wrapper de escritura como en un trigger aa_organization_write_gate anterior a los demás triggers. Reparación READ COMMITTED toma ese mismo gate antes de comparar fuente; espera commits y evita reconciliar contra un snapshot anterior a la espera. No llamadas HTTP dentro de SQL. Hash collisions pueden serializar tenants sin conceder datos. Timeouts/rollback acotan contención.
+G-1: el wrapper adquiere el gate por tenant antes de sus locks de fila explícitos. BEFORE ROW aa_organization_write_gate precede otros triggers, pero no garantiza preceder el lock de fila de UPDATE directo; PostgreSQL puede adquirirlo antes. La inversión de orden frente a repair exige timeout y rollback sin efectos parciales. Reparación READ COMMITTED toma ese mismo gate antes de comparar fuente; espera commits y evita reconciliar contra un snapshot anterior a la espera. No llamadas HTTP dentro de SQL. Hash collisions pueden serializar tenants sin conceder datos. Timeouts/rollback acotan contención.
 
 Authorization conserva scopes exactos, FK, RLS, semántica de snapshots y ausencia de caché entre requests. Las huellas históricas v2 se calculan según fingerprint_version persistido, con serializador congelado. DEPRECATED_PERMISSION_USED deriva de grants históricos del contexto actual aún disponibles salvo el estado del catálogo; no de la mera existencia global del código. Se agrega una sola señal por request sin código/identidad. permissionsFor/scopesFor son el contrato de colecciones; no can por fila ni eliminación de sus controles runtime.
 

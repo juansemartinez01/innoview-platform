@@ -1,5 +1,11 @@
 # Modelo de datos — diseño inicial, no migración definitiva
 
+## Actualización 3.1 — ADR-043
+
+Migración 15 aditiva, sin tablas nuevas: authorization.operation/audit_event incorporan actor_membership_id y actor_user_identity_id. CHECK diferencia actor técnico (ambos NULL) de USER_IDENTITY (ambos obligatorios); FK `(tenant_id,actor_membership_id,actor_user_identity_id)` referencia nueva UNIQUE Membership `(tenant_id,id,user_identity_id)`. CHECK/FK poblados NOT VALID + VALIDATE. Auditoría humana derivada de operación pendiente, historia técnica preservada. DELEGATED_ASSIGN y GRANT_TENANT_ADMIN son tipos distintos.
+
+FK operation→Tenant diferible, inicialmente inmediata; solo delegado la difiere para la revalidación concurrente. Catálogo suma cinco códigos authorization.* migrator-only. Ninguna concesión automática. ACL delegado INSERT asignación, sin UPDATE de asignaciones/roles/composición/catálogo. Identity agrega RLS para referencia propia por issuer/sub, preservando app. Contrato completo: [DELEGATION_3_1.md](DELEGATION_3_1.md).
+
 ## Actualización 2.5 — ADR-042
 
 Migraciones 13 `OrganizationOperationalBoundaries1793131200000` y 14 `DirectoryRepair1793134800000`, aditivas/transaccionales. No se editan las doce anteriores ni se crean entidades empresariales o permisos del catálogo.
