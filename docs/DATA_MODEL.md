@@ -1,5 +1,30 @@
 # Modelo de datos — diseño inicial, no migración definitiva
 
+## Authorization — persistencia implementada en 2.3b
+
+ADR-039 y migración 11 `AuthorizationModel1793037600000`; migraciones anteriores intactas. Esquema SQL `"authorization"`. No se agregan permisos implícitos a Identity, Membership o login.
+
+| Tabla           | Identidad y restricciones                                                                                                                                    | Ciclo de vida                                                                                              |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------- |
+| permission      | UUID estable, code UNIQUE/CHECK `modulo.recurso.accion`, owner_module consistente, description, replaced_by FK a otro Permission                             | ACTIVE→DEPRECATED terminal; código/UUID/owner inmutables; DELETE prohibido; fechas                         |
+| catalog_version | singleton boolean PK true; revision bigint no negativa                                                                                                       | Incremento por cambio real de catálogo, misma transacción; seed técnico inicial 2                          |
+| role            | UUID PK; tenant_id FK Tenant; UNIQUE(tenant_id,id), UNIQUE(tenant_id,name); description                                                                      | ACTIVE/INACTIVE, fechas; mismo nombre permitido entre tenants; sin rol global                              |
+| role_permission | UUID; tenant_id/role_id FK Role; permission_id FK Permission; UNIQUE parcial ACTIVE(tenant_id,role_id,permission_id)                                         | ACTIVE→REVOKED terminal, revoked_at/revocation_reason coherentes; nueva concesión crea otra fila           |
+| role_assignment | UUID; tenant_id/membership_id FK Membership; tenant_id/role_id FK Role; tenant_id/scope_unit_id/scope_type FK OrganizationalUnit                             | ACTIVE→REVOKED terminal; UNIQUE parcial ACTIVE por tenant/membership/role/unidad/tipo; fechas/motivo       |
+| tenant_revision | tenant_id PK/FK Tenant, revision bigint ≥0                                                                                                                   | Cero inicial y suma atómica por cambio real; sin incrementos por replay/no-op                              |
+| operation       | request_id UUID PK global del módulo; UNIQUE(tenant_id,request_id), tenant FK, tipo, huella SHA-256/version2, actor/tipo/motivo/source, result JSONB, fechas | Pendiente solo dentro de transacción; constraint diferida exige completitud; resultado histórico inmutable |
+| audit_event     | UUID; tenant_id/operation_request_id FK compuesta; tipo/id registro, acción/estados, actor/tipo/motivo/source/db_actor/fecha                                 | Derivada por trigger, append-only; varios eventos posibles por operación; sin DELETE/UPDATE runtime        |
+
+Las FK RoleAssignment usan exactamente `(tenant_id,membership_id)→memberships.membership(tenant_id,id)`, `(tenant_id,role_id)→authorization.role(tenant_id,id)` y `(tenant_id,scope_unit_id,scope_type)→organizations.organizational_unit(tenant_id,id,type)`, reutilizando `uq_unit_tenant_id_type`. ON DELETE RESTRICT, no cascadas destructivas. Impiden cruces de tenant/tipos incluso si RLS oculta la fila padre. No prueban pertenencia vigente ni disponibilidad ACTIVE. La dependencia referencial entre módulos nativos queda registrada como excepción controlada; roles runtime sin REFERENCES general.
+
+Índices: asignaciones ACTIVE por `(tenant_id,membership_id,scope_type,scope_unit_id,role_id)`; índice completo `(tenant_id,id)` para operador incluyendo historia; unicidad parcial de concesiones activas, claves tenant/role y auditoría `(tenant_id,operation_request_id)`. Restricciones nuevas se crean directamente en tablas vacías. CHECK adicional technical_source en organizations.operation poblada: ADD CONSTRAINT NOT VALID y VALIDATE; PK/UNIQUE no usan esa sintaxis. TypeORM mapea las ocho entidades sin sincronizar su DDL; SQL versionado es dueño de FK/CHECK/índices/triggers.
+
+Catálogo mínimo: UUID `a0000000-0000-4000-8000-000000000001` para foundation.probe.read y `…0002` para foundation.probe.write. Son referencias técnicas, sin endpoint protegido por esos permisos. Solo migrador cambia catálogo mediante migraciones; deprecados conservan referencias históricas pero no son efectivos ni aceptan nuevas asociaciones. Advisory lock transaccional coordina cambios globales y nuevas asociaciones.
+
+Semántica v1: default deny, grant-only, sin DENY/SUBTREE; GROUP/COMPANY/BRANCH exactos sin herencia. Un nuevo nodo no recibe accesos automáticamente. En 2.4 se verificará la cadena fija de ancestros ACTIVE, pertenencia vigente y tenant. Desactivar un padre invalida disponibilidad sin reescribir concesiones. No confundir ACTIVE almacenado con decisión efectiva; tampoco selección del BFF con autorización.
+
+RLS: seis tablas tenant-scoped ENABLE/FORCE, fronteras restrictivas con tenant UUID validado por CASE. Permission/CatalogVersion son excepciones globales explícitas, migrator-only para escritura. API solo SELECT de catálogo/concesiones/revisión con contexto validado y directorio disponible; asignaciones además visibles según Membership de la identidad contextual. Operador Authorization no tiene accesos a datos privados ajenos y usa sus propios Operation/AuditEvent. Revisión y auditoría solo se modifican por caminos derivados protegidos; no decisiones cacheadas. Diagnóstico inventaría todas las relaciones reales y clasifica cada objeto sin depender de cantidad fija.
+
 ## Organizaciones
 
 - Tenant: límite lógico de aislamiento de una organización cliente. En MVP, un BusinessGroup por tenant.

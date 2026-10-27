@@ -1,3 +1,4 @@
+import { authorizationEntities } from '../authorization/entities.js';
 import 'reflect-metadata';
 import { Membership } from '../memberships/membership.entity.js';
 import { MembershipAuditEvent } from '../memberships/audit-event.entity.js';
@@ -8,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { connectionConfig, type Environment } from './connection.config.js';
 
 export function createDataSource(
-  purpose: 'app' | 'migrator' | 'membership' | 'organizations',
+  purpose:
+    'app' | 'migrator' | 'membership' | 'organizations' | 'authorization',
   env: Environment = process.env,
 ): DataSource {
   const config = connectionConfig(purpose, env);
@@ -24,13 +26,15 @@ export function createDataSource(
     ssl: config.ssl,
     connectTimeoutMS: config.connectionTimeoutMillis,
     schema:
-      purpose === 'organizations'
-        ? 'organizations'
-        : purpose === 'membership'
-          ? 'memberships'
-          : purpose === 'app'
-            ? 'foundation'
-            : 'platform_meta',
+      purpose === 'authorization'
+        ? 'authorization'
+        : purpose === 'organizations'
+          ? 'organizations'
+          : purpose === 'membership'
+            ? 'memberships'
+            : purpose === 'app'
+              ? 'foundation'
+              : 'platform_meta',
     synchronize: false,
     migrationsRun: false,
     migrationsTransactionMode: 'all',
@@ -44,6 +48,7 @@ export function createDataSource(
           ]
         : [],
     entities: [
+      ...authorizationEntities,
       UserIdentity,
       ...organizationEntities,
       Membership,
@@ -55,7 +60,7 @@ export function createDataSource(
 }
 
 async function initializeRestrictedDataSource(
-  purpose: 'app' | 'membership' | 'organizations',
+  purpose: 'app' | 'membership' | 'organizations' | 'authorization',
   env: Environment = process.env,
 ): Promise<DataSource> {
   const source = createDataSource(purpose, env);
@@ -107,6 +112,12 @@ export function initializeOrganizationsOperatorDataSource(
   return initializeRestrictedDataSource('organizations', env);
 }
 
+export function initializeAuthorizationOperatorDataSource(
+  env: Environment = process.env,
+): Promise<DataSource> {
+  return initializeRestrictedDataSource('authorization', env);
+}
+
 export async function validateMigratorConnection(
   env: Environment = process.env,
 ): Promise<void> {
@@ -120,7 +131,7 @@ export async function validateMigratorConnection(
       OR has_database_privilege(current_user, current_database(), 'CREATE')
       OR has_database_privilege(current_user, current_database(), 'TEMP')
       OR (SELECT count(*) FROM pg_namespace WHERE nspname IN ('foundation','platform_meta') AND nspowner=r.oid) <> 2
-      OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=r.oid AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions','identity','organizations','memberships'))
+      OR EXISTS (SELECT 1 FROM pg_namespace WHERE nspowner=r.oid AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions','identity','organizations','memberships','authorization'))
     ) AS unsafe FROM pg_roles r WHERE rolname = current_user`);
     if (!role || role.unsafe) throw new Error('Unsafe migration role');
   } catch {

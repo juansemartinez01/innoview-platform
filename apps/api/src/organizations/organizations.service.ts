@@ -1,4 +1,13 @@
-import { operationFingerprint } from '../operations/fingerprint.js';
+import {
+  establishOperationContext,
+  technicalOperation,
+  transientFailure,
+  TrustedOperationTransientError,
+} from '../operations/operation-context.js';
+import {
+  CURRENT_FINGERPRINT_VERSION,
+  operationFingerprint,
+} from '../operations/fingerprint.js';
 import type { OrganizationOperation } from '../operations/trusted-operation.js';
 import {
   canonicalUuid,
@@ -7,7 +16,7 @@ import {
 } from '../security/security-events.js';
 import { hostname, userInfo } from 'node:os';
 import { Inject, Injectable } from '@nestjs/common';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, EntityNotFoundError } from 'typeorm';
 import {
   Tenant,
   OrganizationalUnit,
@@ -97,7 +106,11 @@ export class OrganizationsService {
       const requestId = this.uuid(context.requestId);
       const actor = context.actor.trim(),
         reason = context.reason.trim();
-      const fingerprint = operationFingerprint(2, type, args);
+      const fingerprint = operationFingerprint(
+        CURRENT_FINGERPRINT_VERSION,
+        type,
+        args,
+      );
       const result = await this.source.transaction(
         'READ COMMITTED',
         async (manager) => {
@@ -105,9 +118,10 @@ export class OrganizationsService {
             "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':organizations' AS trusted FROM pg_roles WHERE rolname=current_user",
           );
           if (!role?.trusted) throw new OrganizationOperationError();
-          await manager.query(
-            "SELECT set_config('innoview.organization_actor',$1,true),set_config('innoview.organization_request',$2,true),set_config('innoview.organization_reason',$3,true),set_config('innoview.organization_actor_type',$4,true)",
-            [actor, requestId, reason, context.actorType],
+          await establishOperationContext(
+            manager,
+            'organizations',
+            technicalOperation(context),
           );
           // Lock the tenant before the operation's FK takes KEY SHARE: upgrading
           // several concurrent FK locks to FOR UPDATE would otherwise deadlock.
@@ -118,7 +132,7 @@ export class OrganizationsService {
             );
           const inserted = await manager.query<{ request_id: string }[]>(
             `INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source,fingerprint_version)
-          VALUES($1,$2,$3,$4,$5,$6,$7,$8,2) ON CONFLICT(request_id) DO NOTHING RETURNING request_id`,
+          VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT(request_id) DO NOTHING RETURNING request_id`,
             [
               requestId,
               tenantId,
@@ -128,6 +142,7 @@ export class OrganizationsService {
               context.actorType,
               reason,
               `${hostname()}:${userInfo().username}`,
+              CURRENT_FINGERPRINT_VERSION,
             ],
           );
           if (!inserted.length) {
@@ -192,6 +207,11 @@ export class OrganizationsService {
         );
       return restored;
     } catch (error) {
+      const transient = transientFailure(error);
+      if (transient) {
+        securityEvent('TRUSTED_OPERATION_CONTENTION', context?.requestId);
+        throw new TrustedOperationTransientError(transient);
+      }
       securityEvent(
         error instanceof OrganizationOperationConflictError
           ? 'TRUSTED_OPERATION_CONFLICT'
@@ -385,6 +405,47 @@ export class OrganizationsService {
         });
       },
     );
+  }
+
+  // Minimal owner contract for technical assignment provisioning. Uses only
+  // this module's source; no EntityManager/credentials are transferred to Auth.
+  async availableScopeReference(
+    tenantId: string,
+    unitId: string,
+    type: OrganizationKind,
+  ): Promise<boolean> {
+    tenantId = this.uuid(tenantId);
+    unitId = this.uuid(unitId);
+    return this.source
+      .transaction('REPEATABLE READ', async (manager) => {
+        await manager.query('SET TRANSACTION READ ONLY');
+        const structure = await this.getStructure(tenantId, manager);
+        if (structure.tenant.status !== 'ACTIVE') return false;
+        const units = new Map(structure.units.map((unit) => [unit.id, unit]));
+        if (units.get(structure.group.id)?.status !== 'ACTIVE') return false;
+        const target = units.get(unitId);
+        if (!target || target.type !== type || target.status !== 'ACTIVE')
+          return false;
+        if (type === 'GROUP') return unitId === structure.group.id;
+        const company =
+          type === 'COMPANY'
+            ? structure.companies.find((row) => row.id === unitId)
+            : structure.companies.find(
+                (row) =>
+                  row.id ===
+                  structure.branches.find((branch) => branch.id === unitId)
+                    ?.companyId,
+              );
+        return (
+          !!company &&
+          company.businessGroupId === structure.group.id &&
+          units.get(company.id)?.status === 'ACTIVE'
+        );
+      })
+      .catch((error: unknown) => {
+        if (error instanceof EntityNotFoundError) return false;
+        throw error;
+      });
   }
 
   // Internal read contract. API consumers must supply the validated tenant scope;

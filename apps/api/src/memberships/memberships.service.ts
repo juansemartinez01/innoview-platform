@@ -46,6 +46,19 @@ export class MembershipsService {
     return rows.map((row) => row.tenantId);
   }
 
+  // Owner's minimal technical reference contract. A separate membership-role
+  // source is required by the trusted provisioning process; no grants to Auth.
+  async activeMembershipReference(
+    tenantId: string,
+    membershipId: string,
+  ): Promise<boolean> {
+    return this.source.getRepository(Membership).existsBy({
+      tenantId: uuid(tenantId),
+      id: uuid(membershipId),
+      status: 'ACTIVE',
+    });
+  }
+
   listForIdentity(
     userIdentityId: string,
     manager: EntityManager = this.source.manager,

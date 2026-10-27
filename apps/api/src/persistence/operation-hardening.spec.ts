@@ -1,3 +1,4 @@
+import { TrustedOperationTransientError } from '../operations/operation-context.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import type { TestContext } from 'node:test';
@@ -14,7 +15,6 @@ import {
 } from '../operations/fingerprint.js';
 import {
   OrganizationsService,
-  OrganizationOperationError,
   OrganizationOperationConflictError,
 } from '../organizations/organizations.service.js';
 import {
@@ -247,8 +247,8 @@ function flatten(plan: Plan): Plan[] {
   return [plan, ...(plan.Plans ?? []).flatMap(flatten)];
 }
 
-class LockContentionProbe1793034000000 implements MigrationInterface {
-  name = 'LockContentionProbe1793034000000';
+class LockContentionProbe1793041200000 implements MigrationInterface {
+  name = 'LockContentionProbe1793041200000';
   async up(runner: QueryRunner): Promise<void> {
     await runner.query('CREATE TABLE organizations.lock_atomic_probe(id int)');
     await runner.query(
@@ -551,21 +551,22 @@ export async function verifyOperationHardening(
       'Plans: 20000 safe synthetic operation records expose the old scan and UUID PK index paths for both trigger predicates',
       async () => {
         const context = organizationOperation();
-        await operator.transaction(async (manager) => {
-          await setContext(manager, context);
-          await manager.query(
-            "SELECT set_config('innoview.fixture_tenant',$1,true)",
-            [record.tenant.id],
-          );
-          await manager.query(`DO $$ DECLARE op uuid; i integer; BEGIN
-          FOR i IN 1..20000 LOOP
+        for (let batch = 0; batch < 20; batch++)
+          await operator.transaction(async (manager) => {
+            await setContext(manager, context);
+            await manager.query(
+              "SELECT set_config('innoview.fixture_tenant',$1,true)",
+              [record.tenant.id],
+            );
+            await manager.query(`DO $$ DECLARE op uuid; i integer; BEGIN
+          FOR i IN 1..1000 LOOP
             op=gen_random_uuid();PERFORM set_config('innoview.organization_request',op::text,true);
             INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source,fingerprint_version)
               VALUES(op,current_setting('innoview.fixture_tenant')::uuid,'SET_STATUS',repeat('0',64),current_setting('innoview.organization_actor'),current_setting('innoview.organization_actor_type'),current_setting('innoview.organization_reason'),'synthetic:plan-only',2);
             UPDATE organizations.operation SET result='{"fixture":true}',completed_at=clock_timestamp() WHERE request_id=op;
           END LOOP;
         END $$`);
-        });
+          });
         await migrator.query('ANALYZE organizations.operation');
         const [{ request_id: target }] = await operator.query<
           { request_id: string }[]
@@ -658,7 +659,7 @@ export async function verifyOperationHardening(
               undefined,
               context,
             ),
-            OrganizationOperationError,
+            TrustedOperationTransientError,
           );
           assert.deepEqual(
             await operator.query(
@@ -754,7 +755,7 @@ export async function verifyOperationHardening(
         await blocker.connect();
         await blocker.startTransaction();
         const probe = createDataSource('migrator', env);
-        probe.setOptions({ migrations: [LockContentionProbe1793034000000] });
+        probe.setOptions({ migrations: [LockContentionProbe1793041200000] });
         await probe.initialize();
         const before = await migrator.query<unknown>(
           'SELECT * FROM platform_meta.migrations ORDER BY id',

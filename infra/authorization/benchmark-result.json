@@ -1,0 +1,935 @@
+{
+  "seed": "innoview-authorization-20261026-v1",
+  "node": "v24.22.1",
+  "postgres": "PostgreSQL 18.6 (Debian 18.6-1.pgdg12+2) on x86_64-pc-linux-gnu, compiled by gcc (Debian 12.2.0-14+deb12u1) 12.2.0, 64-bit",
+  "tenants": 500,
+  "roleAssignments": 50000,
+  "seedDurationMs": 84483.6146,
+  "counts": [
+    {
+      "schema": "authorization",
+      "table": "permission",
+      "rows": "2"
+    },
+    {
+      "schema": "authorization",
+      "table": "catalog_version",
+      "rows": "1"
+    },
+    {
+      "schema": "authorization",
+      "table": "role",
+      "rows": "2016"
+    },
+    {
+      "schema": "authorization",
+      "table": "role_permission",
+      "rows": "4032"
+    },
+    {
+      "schema": "authorization",
+      "table": "role_assignment",
+      "rows": "50000"
+    },
+    {
+      "schema": "authorization",
+      "table": "tenant_revision",
+      "rows": "500"
+    },
+    {
+      "schema": "authorization",
+      "table": "operation",
+      "rows": "1100"
+    },
+    {
+      "schema": "authorization",
+      "table": "audit_event",
+      "rows": "56048"
+    },
+    {
+      "schema": "memberships",
+      "table": "membership",
+      "rows": "1597"
+    },
+    {
+      "schema": "memberships",
+      "table": "audit_event",
+      "rows": "1597"
+    },
+    {
+      "schema": "organizations",
+      "table": "tenant",
+      "rows": "500"
+    },
+    {
+      "schema": "organizations",
+      "table": "business_group",
+      "rows": "500"
+    },
+    {
+      "schema": "organizations",
+      "table": "company",
+      "rows": "1008"
+    },
+    {
+      "schema": "organizations",
+      "table": "branch",
+      "rows": "1008"
+    },
+    {
+      "schema": "organizations",
+      "table": "organizational_unit",
+      "rows": "2516"
+    },
+    {
+      "schema": "organizations",
+      "table": "tenant_directory",
+      "rows": "500"
+    },
+    {
+      "schema": "organizations",
+      "table": "operation",
+      "rows": "500"
+    },
+    {
+      "schema": "organizations",
+      "table": "audit_event",
+      "rows": "5532"
+    }
+  ],
+  "predictions": {
+    "grants": "Tenant/member/scope B-tree access to role_assignment, then role/permission joins; no full cross-tenant assignment scan.",
+    "revision": "Primary-key access to tenant_revision.",
+    "ancestors": "Fixed GROUP/COMPANY/BRANCH joins with explicit tenant predicates, no recursive tree.",
+    "operator": "UUID tenant index path on a small tenant under restrictive operator RLS."
+  },
+  "plans": [
+    {
+      "tenantClass": "large",
+      "query": "grants",
+      "executionMs": 7.522,
+      "nodes": [
+        {
+          "type": "Result",
+          "rows": 400,
+          "loops": 1,
+          "sharedHits": 9261
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 400,
+          "loops": 1,
+          "sharedHits": 9261
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 400,
+          "loops": 1,
+          "sharedHits": 4861
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 40,
+          "loops": 1,
+          "sharedHits": 332
+        },
+        {
+          "type": "Seq Scan",
+          "relation": "permission",
+          "rows": 2,
+          "loops": 1,
+          "sharedHits": 1
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "role_permission",
+          "rows": 20,
+          "loops": 2,
+          "sharedHits": 331
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_active_role_permission",
+          "rows": 20,
+          "loops": 2,
+          "sharedHits": 9
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 40,
+          "sharedHits": 320
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 40,
+          "sharedHits": 200
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 100,
+          "loops": 40,
+          "sharedHits": 120
+        },
+        {
+          "type": "Index Only Scan",
+          "relation": "role_assignment",
+          "index": "uq_active_role_assignment",
+          "rows": 10,
+          "loops": 40,
+          "sharedHits": 4529
+        },
+        {
+          "type": "Index Scan",
+          "relation": "membership",
+          "index": "uq_membership_tenant_id",
+          "rows": 1,
+          "loops": 400,
+          "sharedHits": 1200
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 400,
+          "sharedHits": 3200
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 400,
+          "sharedHits": 2000
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 100,
+          "loops": 400,
+          "sharedHits": 1200
+        },
+        {
+          "type": "Index Scan",
+          "relation": "role",
+          "index": "role_pkey",
+          "rows": 1,
+          "loops": 400,
+          "sharedHits": 4400
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 400,
+          "sharedHits": 3200
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 400,
+          "sharedHits": 2000
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 100,
+          "loops": 400,
+          "sharedHits": 1200
+        }
+      ]
+    },
+    {
+      "tenantClass": "large",
+      "query": "revision",
+      "executionMs": 0.091,
+      "nodes": [
+        {
+          "type": "Result",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 11
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_revision",
+          "index": "tenant_revision_pkey",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 11
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 8
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 5
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 100,
+          "loops": 1,
+          "sharedHits": 3
+        }
+      ]
+    },
+    {
+      "tenantClass": "large",
+      "query": "ancestors",
+      "executionMs": 1.259,
+      "nodes": [
+        {
+          "type": "Nested Loop",
+          "rows": 21,
+          "loops": 1,
+          "sharedHits": 985
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 21,
+          "loops": 1,
+          "sharedHits": 545
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 21,
+          "loops": 1,
+          "sharedHits": 413
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 21,
+          "loops": 1,
+          "sharedHits": 182
+        },
+        {
+          "type": "Index Only Scan",
+          "relation": "business_group",
+          "index": "pk_business_group",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 11
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 8
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 5
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 100,
+          "loops": 1,
+          "sharedHits": 3
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "organizational_unit",
+          "rows": 21,
+          "loops": 1,
+          "sharedHits": 171
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_unit_tenant_id",
+          "rows": 21,
+          "loops": 1,
+          "sharedHits": 2
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 21,
+          "sharedHits": 168
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 21,
+          "sharedHits": 105
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 100,
+          "loops": 21,
+          "sharedHits": 63
+        },
+        {
+          "type": "Index Scan",
+          "relation": "organizational_unit",
+          "index": "uq_unit_tenant_id",
+          "rows": 1,
+          "loops": 21,
+          "sharedHits": 231
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 21,
+          "sharedHits": 168
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 21,
+          "sharedHits": 105
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 100,
+          "loops": 21,
+          "sharedHits": 63
+        },
+        {
+          "type": "Index Scan",
+          "relation": "branch",
+          "index": "pk_branch",
+          "rows": 0.48,
+          "loops": 21,
+          "sharedHits": 132
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 10,
+          "sharedHits": 80
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 10,
+          "sharedHits": 50
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 100,
+          "loops": 10,
+          "sharedHits": 30
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 0.95,
+          "loops": 21,
+          "sharedHits": 440
+        },
+        {
+          "type": "Index Scan",
+          "relation": "company",
+          "index": "pk_company",
+          "rows": 0.95,
+          "loops": 21,
+          "sharedHits": 220
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 20,
+          "sharedHits": 160
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 20,
+          "sharedHits": 100
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 100,
+          "loops": 20,
+          "sharedHits": 60
+        },
+        {
+          "type": "Index Scan",
+          "relation": "organizational_unit",
+          "index": "uq_unit_tenant_id",
+          "rows": 1,
+          "loops": 20,
+          "sharedHits": 220
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 20,
+          "sharedHits": 160
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 20,
+          "sharedHits": 100
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 100,
+          "loops": 20,
+          "sharedHits": 60
+        }
+      ]
+    },
+    {
+      "tenantClass": "small",
+      "query": "grants",
+      "executionMs": 0.406,
+      "nodes": [
+        {
+          "type": "Result",
+          "rows": 16,
+          "loops": 1,
+          "sharedHits": 373
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 16,
+          "loops": 1,
+          "sharedHits": 373
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 16,
+          "loops": 1,
+          "sharedHits": 341
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 16,
+          "loops": 1,
+          "sharedHits": 197
+        },
+        {
+          "type": "Index Only Scan",
+          "relation": "role_assignment",
+          "index": "uq_active_role_assignment",
+          "rows": 8,
+          "loops": 1,
+          "sharedHits": 77
+        },
+        {
+          "type": "Index Scan",
+          "relation": "membership",
+          "index": "uq_membership_tenant_id",
+          "rows": 1,
+          "loops": 8,
+          "sharedHits": 24
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 8,
+          "sharedHits": 48
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 8,
+          "sharedHits": 24
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 3,
+          "loops": 8,
+          "sharedHits": 16
+        },
+        {
+          "type": "Index Only Scan",
+          "relation": "role_permission",
+          "index": "uq_active_role_permission",
+          "rows": 2,
+          "loops": 8,
+          "sharedHits": 120
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 16,
+          "sharedHits": 96
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 16,
+          "sharedHits": 48
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 3,
+          "loops": 16,
+          "sharedHits": 32
+        },
+        {
+          "type": "Index Scan",
+          "relation": "role",
+          "index": "uq_role_tenant_id",
+          "rows": 1,
+          "loops": 16,
+          "sharedHits": 144
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 16,
+          "sharedHits": 96
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 16,
+          "sharedHits": 48
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 3,
+          "loops": 16,
+          "sharedHits": 32
+        },
+        {
+          "type": "Index Scan",
+          "relation": "permission",
+          "index": "permission_pkey",
+          "rows": 1,
+          "loops": 16,
+          "sharedHits": 32
+        }
+      ]
+    },
+    {
+      "tenantClass": "small",
+      "query": "revision",
+      "executionMs": 0.067,
+      "nodes": [
+        {
+          "type": "Result",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 9
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_revision",
+          "index": "tenant_revision_pkey",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 9
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 6
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 3
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 3,
+          "loops": 1,
+          "sharedHits": 2
+        }
+      ]
+    },
+    {
+      "tenantClass": "small",
+      "query": "ancestors",
+      "executionMs": 0.267,
+      "nodes": [
+        {
+          "type": "Nested Loop",
+          "rows": 5,
+          "loops": 1,
+          "sharedHits": 183
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 5,
+          "loops": 1,
+          "sharedHits": 111
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 5,
+          "loops": 1,
+          "sharedHits": 87
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 5,
+          "loops": 1,
+          "sharedHits": 42
+        },
+        {
+          "type": "Index Only Scan",
+          "relation": "business_group",
+          "index": "pk_business_group",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 9
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 6
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 1,
+          "sharedHits": 3
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 3,
+          "loops": 1,
+          "sharedHits": 2
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "organizational_unit",
+          "rows": 5,
+          "loops": 1,
+          "sharedHits": 33
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_unit_tenant_id",
+          "rows": 5,
+          "loops": 1,
+          "sharedHits": 2
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 5,
+          "sharedHits": 30
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 5,
+          "sharedHits": 15
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 3,
+          "loops": 5,
+          "sharedHits": 10
+        },
+        {
+          "type": "Index Scan",
+          "relation": "organizational_unit",
+          "index": "uq_unit_tenant_id",
+          "rows": 1,
+          "loops": 5,
+          "sharedHits": 45
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 5,
+          "sharedHits": 30
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 5,
+          "sharedHits": 15
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 3,
+          "loops": 5,
+          "sharedHits": 10
+        },
+        {
+          "type": "Index Scan",
+          "relation": "branch",
+          "index": "pk_branch",
+          "rows": 0.4,
+          "loops": 5,
+          "sharedHits": 24
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 2,
+          "sharedHits": 12
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 2,
+          "sharedHits": 6
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 3,
+          "loops": 2,
+          "sharedHits": 4
+        },
+        {
+          "type": "Nested Loop",
+          "rows": 0.8,
+          "loops": 5,
+          "sharedHits": 72
+        },
+        {
+          "type": "Index Scan",
+          "relation": "company",
+          "index": "pk_company",
+          "rows": 0.8,
+          "loops": 5,
+          "sharedHits": 36
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 4,
+          "sharedHits": 24
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 4,
+          "sharedHits": 12
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 3,
+          "loops": 4,
+          "sharedHits": 8
+        },
+        {
+          "type": "Index Scan",
+          "relation": "organizational_unit",
+          "index": "uq_unit_tenant_id",
+          "rows": 1,
+          "loops": 4,
+          "sharedHits": 36
+        },
+        {
+          "type": "Index Scan",
+          "relation": "tenant_directory",
+          "index": "tenant_directory_pkey",
+          "rows": 1,
+          "loops": 4,
+          "sharedHits": 24
+        },
+        {
+          "type": "Bitmap Heap Scan",
+          "relation": "membership",
+          "rows": 1,
+          "loops": 4,
+          "sharedHits": 12
+        },
+        {
+          "type": "Bitmap Index Scan",
+          "index": "uq_membership_tenant_id",
+          "rows": 3,
+          "loops": 4,
+          "sharedHits": 8
+        }
+      ]
+    },
+    {
+      "tenantClass": "small",
+      "query": "operator",
+      "executionMs": 0.09,
+      "nodes": [
+        {
+          "type": "Result"
+        },
+        {
+          "type": "Index Only Scan",
+          "relation": "role_assignment",
+          "index": "assignment_tenant",
+          "condition": "(tenant_id = '369d41dd-fd3c-4d43-8246-e47c5e80f696'::uuid)"
+        }
+      ]
+    }
+  ]
+}

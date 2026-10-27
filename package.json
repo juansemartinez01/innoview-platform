@@ -31,7 +31,8 @@
     "db:revert": "pnpm --filter @innoview/api db:revert",
     "oidc:migrate:logout": "node --env-file-if-exists=.env infra/keycloak/cli.mjs migrate-logout",
     "memberships:bootstrap": "pnpm --filter @innoview/api memberships:bootstrap",
-    "db:diagnose": "pnpm --filter @innoview/api db:diagnose"
+    "db:diagnose": "pnpm --filter @innoview/api db:diagnose",
+    "authorization:benchmark": "pnpm --filter @innoview/api build && node --env-file-if-exists=.env infra/authorization/benchmark.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

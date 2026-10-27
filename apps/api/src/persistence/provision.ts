@@ -12,6 +12,7 @@ export async function provisionDatabase(
   const control = connectionConfig('control', env);
   const membership = connectionConfig('membership', env);
   const organizations = connectionConfig('organizations', env);
+  const authorization = connectionConfig('authorization', env);
   const configs = [
     bootstrap,
     app,
@@ -20,14 +21,22 @@ export async function provisionDatabase(
     control,
     membership,
     organizations,
+    authorization,
   ];
-  const runtime = [app, portal, control, membership, organizations];
+  const runtime = [
+    app,
+    portal,
+    control,
+    membership,
+    organizations,
+    authorization,
+  ];
   const runtimeNames = runtime
     .map((c) => pg.escapeIdentifier(c.user))
     .join(', ');
   if (
-    new Set(configs.map((c) => c.user)).size !== 7 ||
-    new Set(configs.map((c) => c.password)).size !== 7
+    new Set(configs.map((c) => c.user)).size !== 8 ||
+    new Set(configs.map((c) => c.password)).size !== 8
   ) {
     throw new Error(
       'Bootstrap, migrator and app must use independent credentials',
@@ -53,6 +62,7 @@ export async function provisionDatabase(
       [control, 'control'],
       [membership, 'membership'],
       [organizations, 'organizations'],
+      [authorization, 'authorization'],
     ] as const) {
       const marker = `innoview:${bootstrap.database}:${kind}`;
       const existing = await client.query<{ marker: string | null }>(
@@ -83,9 +93,11 @@ export async function provisionDatabase(
     }
     // Defaults apply only to new connections; migrate separately from runtime.
     for (const role of runtime) {
-      const operational = [membership.user, organizations.user].includes(
-        role.user,
-      );
+      const operational = [
+        membership.user,
+        organizations.user,
+        authorization.user,
+      ].includes(role.user);
       for (const [setting, value] of Object.entries(
         operational
           ? {
@@ -121,7 +133,7 @@ export async function provisionDatabase(
     if (databaseOwner.rowCount)
       throw new Error('Migrator must not own databases');
     const outsideSchemas = await client.query(
-      "SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions','identity','organizations','memberships')",
+      "SELECT 1 FROM pg_namespace WHERE nspowner=(SELECT oid FROM pg_roles WHERE rolname=$1) AND nspname NOT IN ('foundation','platform_meta','portal_sessions','control_sessions','identity','organizations','memberships','authorization')",
       [migrator.user],
     );
     if (outsideSchemas.rowCount)
@@ -143,6 +155,7 @@ export async function provisionDatabase(
       'identity',
       'organizations',
       'memberships',
+      'authorization',
     ]) {
       const owner = await client.query<{ owner: string }>(
         'SELECT pg_get_userbyid(nspowner) AS owner FROM pg_namespace WHERE nspname=$1',
@@ -217,7 +230,7 @@ export async function provisionDatabase(
       table_name: string;
       columns: string[];
     }>(
-      "SELECT n.nspname AS schema_name,c.relname AS table_name,array_agg(a.attname::text ORDER BY a.attnum) AS columns FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid WHERE n.nspname IN ('organizations','memberships') AND c.relkind='r' AND a.attnum>0 AND NOT a.attisdropped GROUP BY n.nspname,c.relname",
+      "SELECT n.nspname AS schema_name,c.relname AS table_name,array_agg(a.attname::text ORDER BY a.attnum) AS columns FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_attribute a ON a.attrelid=c.oid WHERE n.nspname IN ('organizations','memberships','authorization') AND c.relkind='r' AND a.attnum>0 AND NOT a.attisdropped GROUP BY n.nspname,c.relname",
     );
     for (const row of columns.rows)
       await client.query(
@@ -284,6 +297,54 @@ export async function provisionDatabase(
       await client.query(
         `GRANT SELECT, INSERT ON memberships.audit_event TO ${q(membership.user)}`,
       );
+    }
+    await client.query(
+      `GRANT USAGE ON SCHEMA "authorization" TO ${q(app.user)},${q(authorization.user)}`,
+    );
+    const authorizationGuard = await client.query<{ oid: string | null }>(
+      'SELECT to_regprocedure(\'"authorization".require_operation()\') AS oid',
+    );
+    if (authorizationGuard.rows[0].oid)
+      await client.query(
+        `GRANT EXECUTE ON FUNCTION "authorization".require_operation() TO ${q(authorization.user)}`,
+      );
+    for (const table of [
+      'permission',
+      'catalog_version',
+      'role',
+      'role_permission',
+      'role_assignment',
+      'tenant_revision',
+      'operation',
+      'audit_event',
+    ]) {
+      const exists = await client.query<{ exists: boolean }>(
+        'SELECT to_regclass($1) IS NOT NULL AS exists',
+        [`"authorization".${table}`],
+      );
+      if (!exists.rows[0]?.exists) continue;
+      if (!['operation', 'audit_event'].includes(table))
+        await client.query(
+          `GRANT SELECT ON "authorization".${q(table)} TO ${q(app.user)}`,
+        );
+      await client.query(
+        `GRANT SELECT ON "authorization".${q(table)} TO ${q(authorization.user)}`,
+      );
+      if (['permission', 'catalog_version'].includes(table)) continue;
+      await client.query(
+        `GRANT INSERT ON "authorization".${q(table)} TO ${q(authorization.user)}`,
+      );
+      const updates: Record<string, string> = {
+        role: 'name,description,status,updated_at',
+        role_permission: 'status,updated_at',
+        role_assignment: 'status,updated_at',
+        tenant_revision: 'revision',
+        operation: 'result,completed_at',
+      };
+      if (updates[table])
+        await client.query(
+          `GRANT UPDATE(${updates[table]}) ON "authorization".${q(table)} TO ${q(authorization.user)}`,
+        );
     }
     await client.query('COMMIT');
   } catch {

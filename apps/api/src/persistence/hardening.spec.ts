@@ -380,7 +380,10 @@ export async function verifyHardening(
       async () => {
         const healthy = await securityInvariants(operator);
         assert.deepEqual(healthy.findings, []);
-        assert.equal(healthy.tables.length, 16);
+        const [inventory] = await migrator.query<{ n: number }[]>(
+          "SELECT count(*)::int AS n FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace JOIN pg_roles r ON r.oid=n.nspowner WHERE c.relkind='r' AND shobj_description(r.oid,'pg_authid')='innoview:'||current_database()||':migrator'",
+        );
+        assert.equal(healthy.tables.length, inventory.n);
         await migrator.query(
           `GRANT UPDATE(name) ON organizations.tenant TO ${pg.escapeIdentifier(env.DB_APP_USER!)}`,
         );
@@ -529,6 +532,7 @@ export async function verifyHardening(
           'control',
           'membership',
           'organizations',
+          'authorization',
           'migrator',
           'bootstrap',
         ] as const) {
@@ -545,7 +549,11 @@ export async function verifyHardening(
             }>(
               "SELECT current_setting('statement_timeout') AS statement,current_setting('idle_in_transaction_session_timeout') AS idle,current_setting('transaction_timeout') AS transaction,current_setting('lock_timeout') AS lock",
             );
-            const expected = ['membership', 'organizations'].includes(purpose)
+            const expected = [
+              'membership',
+              'organizations',
+              'authorization',
+            ].includes(purpose)
               ? {
                   statement: '20s',
                   idle: '30s',
@@ -698,6 +706,7 @@ export async function verifyHardening(
           const first = randomUUID(),
             second = randomUUID();
           assert.equal(correlationId(first), first);
+          assert.notEqual(correlationId(first + '\n'), first + '\n');
           assert.notEqual(
             correlationId('injected\nheader'),
             'injected\nheader',

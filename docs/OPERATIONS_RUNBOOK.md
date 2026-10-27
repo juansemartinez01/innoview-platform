@@ -1,10 +1,76 @@
-# Operaciones técnicas y diagnóstico — 2.3a
+# Operaciones técnicas y diagnóstico — contrato vigente 2.3b
 
-Solo desarrollo local controlado; no es un despliegue productivo ni un instalador general. 2.2 aprobado en 9175804; 2.3a pendiente de revisión. Sin RBAC ni administración empresarial HTTP.
+Solo desarrollo local controlado; no es un despliegue productivo ni un instalador general. 2.3a/2.3a.1 oficialmente aprobados y cerrados en `0d92c34`. Modelo RBAC persistente de 2.3b pendiente de revisión; sin evaluador, Guards ni administración empresarial HTTP. Los apartados históricos debajo conservan su contexto; este apartado y ADR-039 tienen precedencia para el contrato actual.
 
-## Corrección 2.3a.1 — contrato vigente
+## Actualización 2.3b y separación de actores
 
-2.3a aprobado con condiciones en 685a29c; esta corrección queda pendiente de revisión. ADR-038 agrega la décima migración OperationTriggerHardening1793030400000, sin editar las nueve anteriores. No hay variables/dependencias nuevas ni RBAC. Los apartados de 2.3a debajo conservan su descripción histórica, actualizada por este addendum.
+Detener los tres servidores y todos los escritores operativos. No borrar volúmenes, regenerar credenciales existentes ni ejecutar down de migraciones en una base habitual. Agregar a `.env` únicamente `DB_AUTHORIZATION_USER=innoview_authorization_operator` y una `DB_AUTHORIZATION_PASSWORD` aleatoria nueva, independiente de los otros 15 secretos. Puede generarse sin imprimirla con un script local usando `crypto.randomBytes(32)` y escribir solo la línea faltante. `.env.example` deja el valor vacío. No ejecutar herramientas contra una base elegida por un parámetro HTTP.
+
+```powershell
+pnpm install --frozen-lockfile
+docker compose up -d --wait --wait-timeout 240
+pnpm db:provision
+pnpm db:run
+pnpm db:provision
+pnpm db:show
+pnpm db:diagnose
+pnpm db:generate src/persistence/migrations/AuthorizationCheck --check
+pnpm dev
+```
+
+La migración 11 agrega ocho tablas Authorization, funciones SECURITY INVOKER, políticas/grants exactos y un CHECK adicional sobre organizations.operation mediante NOT VALID/VALIDATE. No editar migraciones anteriores. Para tablas pobladas, usar ese patrón solo en CHECK/FK admitidos y con plan de mantenimiento; no aplica a PK/UNIQUE. Las tablas nuevas crean constraints directamente. Mantener escritores detenidos: VALIDATE en la misma transacción no elimina el lock adquirido por ADD CONSTRAINT. Un fallo debe revertir toda la migración, sin marcar historia manualmente; show/diagnose confirman el resultado antes de reiniciar pools. Generate --check no administra automáticamente los triggers/FK del modelo Authorization: sus entidades no sincronizan DDL, cuyo contrato se verifica en PostgreSQL real.
+
+### Matriz de privilegios de Authorization
+
+| Actor                                      | Catálogo global Permission/Version                     | Role/RolePermission/RoleAssignment/Revision                                              | Operation/AuditEvent                                                                         | Otros datos                                                |
+| ------------------------------------------ | ------------------------------------------------------ | ---------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ---------------------------------------------------------- |
+| Migrador                                   | Catálogo por migraciones; versión derivada por trigger | DDL, ownership y políticas; FORCE aplica a DML sin política                              | DDL y ownership                                                                              | Esquemas administrados, sin SUPERUSER/BYPASSRLS            |
+| Aplicación API                             | SELECT                                                 | SELECT con frontera tenant/identidad/directorio; asignaciones propias vía Membership RLS | Ningún acceso                                                                                | Contratos existentes; sin escrituras Authorization         |
+| Operador Authorization                     | SELECT                                                 | SELECT/INSERT tenant-scoped; UPDATE solo columnas operativas, revisión derivada          | SELECT/INSERT; UPDATE solo resultado/completed_at en operación pendiente, auditoría derivada | Sin sesiones ni lectura privada Memberships/Organizations  |
+| Operadores Organizations/Memberships y BFF | Ninguno                                                | Ninguno                                                                                  | Ninguno                                                                                      | Solo privilegios de sus módulos existentes                 |
+| Bootstrap                                  | Solo aprovisionamiento local controlado                | No se usa en operaciones normales                                                        | No se usa en operaciones normales                                                            | Credencial administrativa separada de los procesos runtime |
+
+Ningún rol runtime obtiene DELETE/TRUNCATE/REFERENCES/DDL/ownership/BYPASSRLS ni privilegios globales nuevos. La función exacta require_operation debe conservar EXECUTE únicamente para el operador Authorization: sus triggers SECURITY INVOKER validan la operación pendiente por UUID. Aprovisionamiento reconcilia esa excepción después de retirar grants viejos; PUBLIC y otros roles no tienen EXECUTE en funciones Authorization. Secuencias nuevas: ninguna, UUID generados por PostgreSQL.
+
+Los launchers API y ambos BFF siguen usando allowlists; `DB_AUTHORIZATION_USER/PASSWORD` quedan fuera del proceso servidor y sus hijos, igual que las demás credenciales privilegiadas. La API falla antes de importar Nest si se inyectan accidentalmente DB_* no admitidas. Las herramientas de mantenimiento pueden leer `.env`; en despliegues futuros deben recibir exclusivamente su propio secreto mediante configuración por proceso. Allowlists no protegen de un administrador del host ni de SQL arbitrario con la misma conexión. No imprimir conexiones, contraseñas, SQL con parámetros, JWT ni errores driver completos.
+
+### Invocación técnica confiable, sin endpoints
+
+`initializeAuthorizationOperatorDataSource(env)` valida que el rol sea el operador independiente y no posea flags/ownership/membresías privilegiadas. Instanciar `AuthorizationService(source, references)` solo en una herramienta técnica confiable. `references` delega `membershipActive` a MembershipsService con su fuente operativa propia y `scopeAvailable` a OrganizationsService con la suya; no pasar su EntityManager al módulo ajeno ni ampliar grants Authorization. Cada fuente debe recibir DB_HOST/PORT/NAME/SSL y su pareja DB_<PROPOSITO>_USER/PASSWORD. Destruir las fuentes al finalizar. No registrar estas conexiones en AppModule HTTP.
+
+Métodos: createRole, setRoleStatus, grantPermission, revokePermission, assign y revokeAssignment. El invocador entrega tenant UUID verificado y TrustedOperation con actor técnico SYSTEM/INNOVIEW_OPERATOR, motivo y requestId UUID estable por operación lógica; no recibe ese contexto de un navegador. El wrapper valida marca de rol, abre transacción, establece GUC LOCAL tenant/actor/motivo/requestId/tipo y lock_timeout8s, inserta operación idempotente, bloquea la revisión del tenant, escribe y completa resultado. Datos/revisión/auditoría son atómicos. No compartir tablas operation/audit_event o credenciales entre módulos. Catálogo se cambia únicamente mediante una nueva migración; no pasa por este servicio.
+
+Reintentar la misma operación/contexto reproduce el resultado original, no una lectura actual. Cambiar argumentos, tipo, tenant o procedencia con el mismo UUID produce REQUEST_ID_CONFLICT. Historial completado y revocaciones son inmutables; reasignar crea nueva fila/requestId de nueva operación lógica. No limpiar filas de operation para reciclar identificadores.
+
+Asignación comprueba Membership ACTIVE y disponibilidad de tenant/unidad/ancestros con contratos de sus propietarios, con snapshots distintos: ventana TOCTOU explícita. Una asignación guardada puede dejar de estar disponible inmediatamente después; no es efectiva sin revalidación transaccional en 2.4. FK comprueba existencia/tipo/tenant, no estado. RLS de autorización limita filas por tenant, no implementa evaluación de permisos empresariales. No lanzar SQL operativo desde API ni dar acceso a usuarios por ser miembros/seleccionar tenant.
+
+### Contención y recuperación N-1
+
+Default de rol Organizations/Authorization: lock_timeout1s; wrapper confiable SET LOCAL8s antes de locks/ON CONFLICT, por debajo de statement_timeout20s. API/BFF siguen 1s. Migrador3s y Memberships1s sin cambios. Idle30s/transaction120s de operadores conservados. El incremento de revisión serializa cambios de autorización de un tenant y puede producir contención; es una decisión deliberada para escrituras poco frecuentes.
+
+55P03, 40001, 40P01, clase08 y errores pertinentes de conexión se clasifican como TrustedOperationTransientError, retryable y retryAfterSeconds1; solo se emite TRUSTED_OPERATION_CONTENTION con requestId. No se imprimen SQL/mensajes driver ni se consulta la transacción abortada. Primero verificar rollback, resolver contención legítima y repetir con el mismo requestId. Nunca reintentar REQUEST_ID_CONFLICT como indisponibilidad. Sin bucles automáticos ilimitados. La futura capa HTTP 2.4 deberá mapear el error a estado/Retry-After apropiados; no existe un endpoint nuevo. La regresión demora el primer request 1,6s y verifica que el segundo obtiene replay, sin datos/eventos duplicados.
+
+### Benchmark RBAC descartable
+
+```powershell
+docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
+pnpm authorization:benchmark
+docker compose -f compose.test.yaml down
+```
+
+Requiere TEST_DB_HOST/PORT/POSTGRES_PASSWORD existentes de `.env`, PostgreSQL 18.6 y build API. No necesita Keycloak para generar datos sintéticos; la suite normal sí ejecuta Keycloak/Chromium. Solo crea `innoview_test_<UUID>` y roles nuevos, y limpia exclusivamente lo que creó en finally. No usa DB_NAME habitual, no borra volúmenes y no desactiva triggers. Fuera de CI ordinaria pesada. Semilla `innoview-authorization-20261026-v1`; distribución lógica/UUID de fixtures deterministas, UUID Membership generados por el servicio y fechas/datos operativos de cada ejecución no son bit a bit idénticos.
+
+Volumen: 500 tenants (uno con 25.050 asignaciones y 499 con 50), 50.000 asignaciones, tenant grande con 100 identidades / 20 roles / 10 compañías / 10 sucursales; pequeños con 3 identidades / 4 roles / 2 compañías / 2 sucursales. Dos permisos técnicos por rol, grupos y jerarquía completa. Lotes de 250 asignaciones/transacción y procesos operativos reales con RLS/guardas/auditoría/revisiones activas. Entorno local Windows/PowerShell/Docker Desktop, Node 24.22.1; reporte registra versión PostgreSQL y semilla. Conteos finales exactos, no estimaciones de pg_stat.
+
+Predicción emitida **antes** de ejecutar: acceso B-tree tenant/membership/scope para concesiones, PK para revisión, joins de ancestros de profundidad fija, índice UUID por tenant para operador. EXPLAIN(ANALYZE,BUFFERS,FORMAT JSON) bajo rol API contextual incluye permiso/rol vigentes y sobrecosto RLS; el operador se mide aparte. Se permiten planes equivalentes del optimizador, sin hints ni umbrales de tiempo. Índice completo assignment_tenant soporta lectura operativa de historia, además de índices parciales ACTIVE. El artefacto `infra/authorization/benchmark-result.json` conserva nodos/índices/filas/buffers/tiempos locales; no es garantía temporal ni evaluador definitivo de 2.4.
+
+El benchmark anterior de 20.000 operaciones Organizations ahora usa 20 lotes de 1.000, todos con triggers activos y límites ordinarios. Conserva comparación Seq Scan con cast de columna frente a Index Scan operation_pkey UUID, y continúa en CI normal. No confundir el nombre de fixture con una prueba sobre datos de desarrollo.
+
+Pendientes 2.4: evaluación efectiva, Guards, relectura de disponibilidad Membership/Organizations y ancestros, invalidación demostrada antes de cachear, consulta real del evaluador/benchmark. Pendientes 2.5: hardening del operador Organizations de alcance amplio, diagnóstico/reparación soportada de tenant_directory e instalación reproducible desde cero. No declarar cerrada Fase 2.
+
+## Corrección 2.3a.1 — antecedente aprobado
+
+2.3a y esta corrección quedaron aprobados y cerrados en `0d92c34`. ADR-038 agregó la décima migración OperationTriggerHardening1793030400000, sin editar las nueve anteriores. Este antecedente no incorporó variables/dependencias nuevas ni RBAC; 2.3b extiende el contrato según el apartado vigente de arriba.
 
 Detener API/BFF y **todos los escritores operativos** antes de actualizar. Ejecutar la secuencia de actualización del apartado siguiente, que ahora aplica diez migraciones; reiniciar pools tras provisionar. No mezclar código escritor antiguo y esquema nuevo: las filas previas son fingerprint_version=1 y el nuevo default/escritor es 2. El servicio nuevo reproduce v1 y v2 según la versión almacenada, sin recalcular historial. Revert solo para el ciclo de bases descartables; no degradar código/esquema sobre registros v2 persistentes.
 

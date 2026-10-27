@@ -6,7 +6,8 @@ export type DatabasePurpose =
   | 'portal'
   | 'control'
   | 'membership'
-  | 'organizations';
+  | 'organizations'
+  | 'authorization';
 
 export interface ConnectionConfig {
   host: string;

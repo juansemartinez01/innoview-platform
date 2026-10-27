@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+export const CURRENT_FINGERPRINT_VERSION = 2 as const;
 
 // v2 uses typed nodes, so undefined/absent/null and user objects cannot collide
 // with serializer markers. No getters, toJSON, class instances or sparse arrays.

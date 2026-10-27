@@ -132,6 +132,8 @@ await test(
       DB_MEMBERSHIP_PASSWORD: secret(),
       DB_ORGANIZATIONS_USER: `test_organizations_${suffix}`,
       DB_ORGANIZATIONS_PASSWORD: secret(),
+      DB_AUTHORIZATION_USER: `test_authorization_${suffix}`,
+      DB_AUTHORIZATION_PASSWORD: secret(),
       PORTAL_COOKIE_PASSWORD: secret(),
       PORTAL_TOKEN_PASSWORD: secret(),
       CONTROL_COOKIE_PASSWORD: secret(),
@@ -498,7 +500,7 @@ await test(
           for (const keys of records) {
             assert.ok(
               !keys.some((key) =>
-                /^(DB_(BOOTSTRAP|MIGRATOR|MEMBERSHIP|ORGANIZATIONS|APP)_|KEYCLOAK_|IDENTITY_|PLATFORM_|TEST_)/.test(
+                /^(DB_(BOOTSTRAP|MIGRATOR|MEMBERSHIP|ORGANIZATIONS|AUTHORIZATION|APP)_|KEYCLOAK_|IDENTITY_|PLATFORM_|TEST_)/.test(
                   key,
                 ),
               ),
@@ -750,18 +752,26 @@ await test(
           assert.deepEqual(tables.map((row) => row.table_name).sort(), [
             'audit_event',
             'audit_event',
+            'audit_event',
             'branch',
             'business_group',
+            'catalog_version',
             'company',
             'membership',
             'migrations',
             'operation',
+            'operation',
             'organizational_unit',
+            'permission',
             'persistence_probe',
+            'role',
+            'role_assignment',
+            'role_permission',
             'sessions',
             'sessions',
             'tenant',
             'tenant_directory',
+            'tenant_revision',
             'typeorm_metadata',
             'user_identity',
           ]);
@@ -1305,6 +1315,7 @@ await test(
           'DB_CONTROL_USER',
           'DB_MEMBERSHIP_USER',
           'DB_ORGANIZATIONS_USER',
+          'DB_AUTHORIZATION_USER',
         ])
           await bootstrap.query(`DROP ROLE ${pg.escapeIdentifier(env[key])}`);
       }

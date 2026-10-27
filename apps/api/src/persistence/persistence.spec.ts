@@ -1,3 +1,4 @@
+import { verifyAuthorization } from '../authorization/authorization.spec.js';
 import {
   versionOneFixture,
   verifyVersionOneUpgrade,
@@ -74,6 +75,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     DB_MEMBERSHIP_PASSWORD: randomBytes(24).toString('hex'),
     DB_ORGANIZATIONS_USER: `test_organizations_${suffix}`,
     DB_ORGANIZATIONS_PASSWORD: randomBytes(24).toString('hex'),
+    DB_AUTHORIZATION_USER: `test_authorization_${suffix}`,
+    DB_AUTHORIZATION_PASSWORD: randomBytes(24).toString('hex'),
     DB_MIGRATOR_PASSWORD: randomBytes(24).toString('hex'),
   };
   const app = createDataSource('app', env);
@@ -172,7 +175,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
                 name.endsWith('.js') &&
                 !name.includes('OrganizationsTenantRls') &&
                 !name.includes('OrganizationOperations') &&
-                !name.includes('OperationTriggerHardening'),
+                !name.includes('OperationTriggerHardening') &&
+                !name.includes('AuthorizationModel'),
             )
             .map((name) =>
               fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
@@ -228,7 +232,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
                 (name) =>
                   name.endsWith('.js') &&
                   !name.includes('OrganizationOperations') &&
-                  !name.includes('OperationTriggerHardening'),
+                  !name.includes('OperationTriggerHardening') &&
+                  !name.includes('AuthorizationModel'),
               )
               .map((name) =>
                 fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
@@ -257,7 +262,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               .filter(
                 (name) =>
                   name.endsWith('.js') &&
-                  !name.includes('OperationTriggerHardening'),
+                  !name.includes('OperationTriggerHardening') &&
+                  !name.includes('AuthorizationModel'),
               )
               .map((name) =>
                 fileURLToPath(new URL(name, folder)).replaceAll('\\', '/'),
@@ -270,7 +276,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
             await nine.destroy();
           }
           const v1 = await versionOneFixture(operator);
-          assert.equal((await migrator.runMigrations()).length, 1);
+          assert.equal((await migrator.runMigrations()).length, 2);
           await verifyVersionOneUpgrade(operator, v1);
 
           assert.equal(
@@ -315,7 +321,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               'SELECT count(*)::int AS n FROM platform_meta.migrations',
             )
           )[0].n,
-          10,
+          11,
         );
         assert.equal(await migrator.showMigrations(), false);
         const [owner] = await migrator.query<{ owner: string }[]>(
@@ -614,11 +620,25 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await verifyOrganizationsRls(t, app, migrator, env);
     await verifyHardening(t, app, migrator, env);
     await verifyOperationHardening(t, migrator, env);
+    await verifyAuthorization(t, app, migrator, env);
 
     await t.test(
       'real migration reverts and reapplies only in this disposable database',
       async () => {
         assert.match(database, /^innoview_test_[a-f0-9]{32}$/);
+        const revertAuthorization = spawnSync(
+          process.execPath,
+          [
+            fileURLToPath(new URL('./migration.cli.js', import.meta.url)),
+            'revert',
+          ],
+          {
+            env: { ...process.env, ...env, DB_DISPOSABLE: 'true' },
+            encoding: 'utf8',
+            windowsHide: true,
+          },
+        );
+        assert.equal(revertAuthorization.status, 0, revertAuthorization.stderr);
         const revertTriggerHardening = spawnSync(
           process.execPath,
           [
@@ -821,6 +841,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
           env.DB_CONTROL_USER!,
           env.DB_MEMBERSHIP_USER!,
           env.DB_ORGANIZATIONS_USER!,
+          env.DB_AUTHORIZATION_USER!,
         ])
           await bootstrap.query(
             `DROP ROLE IF EXISTS ${pg.escapeIdentifier(role)}`,

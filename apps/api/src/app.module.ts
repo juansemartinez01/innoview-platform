@@ -1,3 +1,4 @@
+import { AuthorizationModule } from './authorization/authorization.module.js';
 import { ContextModule } from './context/context.module.js';
 import { MembershipsModule } from './memberships/memberships.module.js';
 import { OrganizationsModule } from './organizations/organizations.module.js';
@@ -8,6 +9,7 @@ import { PersistenceModule } from './persistence/persistence.module.js';
 
 @Module({
   imports: [
+    AuthorizationModule,
     PersistenceModule,
     IdentityModule,
     OrganizationsModule,

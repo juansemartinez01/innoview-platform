@@ -1,6 +1,46 @@
 # Innoview Platform
 
-Fases 0 y 1 oficialmente cerradas; 2.1 y 2.2 aprobados hasta 9175804. **2.3a aprobado con condiciones en 685a29c; 2.3a.1 implementado, pendiente de revisión.** Sin RBAC, Authorization funcional ni endpoints administrativos. Los apartados anteriores conservan su contexto histórico; ADR-038 y el runbook describen la corrección vigente. No avanzar a 2.3b sin autorización.
+Fases 0 y 1 cerradas; 2.3a/2.3a.1 aprobados y cerrados en `0d92c34`. **2.3b implementa el modelo RBAC persistente, pendiente de revisión.** No hay evaluador de permisos, Guards empresariales ni endpoints administrativos. ADR-039 y el runbook describen el contrato vigente; los apartados anteriores conservan su contexto histórico. No comenzar 2.4 sin revisión.
+
+## Modelo RBAC — 2.3b
+
+Authorization es dueño de ocho tablas: Permission y CatalogVersion globales; Role, RolePermission, RoleAssignment, TenantAuthorizationRevision, Operation y AuditEvent por tenant. La undécima migración `AuthorizationModel1793037600000` agrega restricciones, auditoría, revisiones bigint y RLS ENABLE/FORCE. Se conservan las diez migraciones anteriores. Las entidades TypeORM tienen `synchronize: false`; sus constraints y triggers se administran mediante SQL versionado.
+
+El catálogo técnico mínimo `foundation.probe.read/write` no concede ninguna capacidad HTTP. Solo el migrador puede cambiar Permission, mediante migraciones; código inmutable, deprecación terminal e historial preservado. Cada cambio real incrementa la versión global. Roles homónimos entre tenants son válidos; asignaciones usan FK compuestas y scopes exactos GROUP/COMPANY/BRANCH, sin herencia. Cada cambio real de concesiones incrementa atómicamente la revisión del tenant. No hay caché ni proveedor funcional para `authorization.access@1`.
+
+Para actualizar, detener servidores y escritores operativos. Conservar `.env` y volúmenes. Agregar `DB_AUTHORIZATION_USER=innoview_authorization_operator` y `DB_AUTHORIZATION_PASSWORD` aleatoria nueva e independiente (32 bytes hex recomendados, mínimo 16 caracteres). No copiar valores de otros roles ni imprimirlos. Después:
+
+```powershell
+pnpm install --frozen-lockfile
+docker compose up -d --wait --wait-timeout 240
+pnpm db:provision
+pnpm db:run
+pnpm db:provision
+pnpm db:show
+pnpm db:diagnose
+pnpm dev
+```
+
+El operador Authorization es independiente, sin DDL/ownership/BYPASSRLS ni acceso a sesiones o tablas privadas de otros módulos. Su transacción valida el rol, recibe tenant/actor/motivo/requestId/tipo confiables, establece GUC LOCAL y usa el mismo manager. Los launchers API/Portal/Control Center excluyen ambas variables Authorization, incluso heredadas del padre. El HTTP sigue usando solo DB_APP. El servicio técnico no tiene controlador: se instancia en herramientas confiables con su DataSource propio y contratos de los propietarios Memberships/Organizations con conexiones independientes. No introducir esas credenciales en los servidores HTTP.
+
+Pruebas y benchmark se ejecutan exclusivamente sobre bases generadas descartables:
+
+```powershell
+docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
+pnpm lint
+pnpm format:check
+pnpm typecheck
+pnpm test
+pnpm build
+pnpm authorization:benchmark
+docker compose -f compose.test.yaml down
+```
+
+El benchmark pesado no forma parte de CI ordinaria: semilla fija, 500 tenants, 50.000 asignaciones, distribución sesgada y triggers activos. Escribe `infra/authorization/benchmark-result.json` con planes JSON resumidos y mediciones locales; no representa el evaluador de 2.4. La suite normal conserva EXPLAIN de 20.000 operaciones Organizations en lotes acotados, sin umbrales arbitrarios de tiempo.
+
+Organizations y Authorization usan `lock_timeout=8s` LOCAL en el camino confiable (default del rol 1s, statement 20s). Los fallos transitorios producen error técnico tipado y evento de contención seguro; reintentar manualmente el mismo requestId tras resolver la causa. REQUEST_ID_CONFLICT es permanente. No se agregan endpoints ni reintentos ilimitados.
+
+Una asignación persistida no es una decisión de acceso. En 2.4 se revalidarán transaccionalmente pertenencia, tenant, unidad y ancestros ACTIVE, además del permiso/rol/concesiones. Las comprobaciones técnicas actuales entre propietarios tienen una ventana TOCTOU documentada; una revisión RBAC no invalida por sí sola los cambios de Memberships/Organizations. Ver [ADR-039](docs/DECISIONS.md), [modelo](docs/DATA_MODEL.md) y [runbook](docs/OPERATIONS_RUNBOOK.md).
 
 ## Corrección 2.3a.1
 
@@ -100,7 +140,7 @@ pnpm exec node --version
 pnpm exec playwright install --only-shell chromium
 ```
 
-Crear `.env` con quince contraseñas/claves aleatorias e independientes, sin imprimirlas. Este comando **falla si el archivo ya existe**; para un entorno existente conservarlo y agregar únicamente las variables faltantes de `.env.example`.
+Crear `.env` con dieciséis contraseñas/claves aleatorias e independientes, sin imprimirlas. Este comando **falla si el archivo ya existe**; para un entorno existente conservarlo y agregar únicamente las variables faltantes de `.env.example`.
 
 ```powershell
 @'

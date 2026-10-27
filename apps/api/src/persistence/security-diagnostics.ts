@@ -8,6 +8,7 @@ const knownSchemas = [
   'memberships',
   'portal_sessions',
   'control_sessions',
+  'authorization',
 ];
 const privateOrganizations = [
   'tenant',
@@ -31,6 +32,23 @@ const directoryQual =
 const tenantQual = (table: string) =>
   `(((${table === 'tenant' ? 'id' : 'tenant_id'})::text = NULLIF(current_setting('innoview.tenant_id'::text, true), ''::text)) AND (EXISTS ( SELECT 1 FROM organizations.tenant_directory d WHERE ((d.tenant_id = ${table}.${table === 'tenant' ? 'id' : 'tenant_id'}) AND d.available))))`;
 
+const authorizationScoped = [
+  'role',
+  'role_permission',
+  'role_assignment',
+  'tenant_revision',
+  'operation',
+  'audit_event',
+];
+const authorizationCatalog = ['permission', 'catalog_version'];
+const authorizationTenantQual =
+  "(tenant_id = CASE WHEN (current_setting('innoview.tenant_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.tenant_id'::text, true))::uuid ELSE NULL::uuid END)";
+const authorizationAppQual = (table: string) => {
+  const base = `(${authorizationTenantQual} AND (EXISTS ( SELECT 1 FROM organizations.tenant_directory d WHERE ((d.tenant_id = ${table}.tenant_id) AND d.available))))`;
+  return table === 'role_assignment'
+    ? `${base.slice(0, -1)} AND (EXISTS ( SELECT 1 FROM memberships.membership m WHERE ((m.tenant_id = role_assignment.tenant_id) AND (m.id = role_assignment.membership_id)))))`
+    : base;
+};
 // Inventory-driven: all relations and every live column are inspected. Unknown
 // tables receive no runtime permissions until explicitly classified here.
 export async function securityInvariants(source: DataSource) {
@@ -60,6 +78,7 @@ export async function securityInvariants(source: DataSource) {
       'control',
       'membership',
       'organizations',
+      'authorization',
     ])
       if (roles.filter((r) => r.kind === kind).length !== 1)
         findings.push(`ROLE_CONTRACT:${kind}`);
@@ -100,8 +119,11 @@ export async function securityInvariants(source: DataSource) {
       const internal =
         table.schema === 'organizations' &&
         ['audit_event', 'operation'].includes(table.name);
+      const authScoped =
+        table.schema === 'authorization' &&
+        authorizationScoped.includes(table.name);
       if (
-        (isPrivate || identityScoped || directory || internal) &&
+        (isPrivate || identityScoped || directory || internal || authScoped) &&
         (!table.rls || !table.force)
       )
         findings.push(`RLS_FLAGS:${path}`);
@@ -138,6 +160,56 @@ export async function securityInvariants(source: DataSource) {
         }
         if (applicable.length !== 2)
           findings.push(`ADDITIONAL_APP_POLICY:${path}`);
+      }
+      if (authScoped) {
+        for (const [kind, prefix] of [
+          ['authorization', 'operator'],
+          ['app', 'app'],
+        ]) {
+          const actor = roles.find((role) => role.kind === kind)?.name;
+          const actual = policies.filter(
+            (policy) =>
+              policy.schemaname === 'authorization' &&
+              policy.tablename === table.name &&
+              (policy.roles.includes(actor ?? '') ||
+                policy.roles.includes('public')),
+          );
+          const expected =
+            kind === 'authorization'
+              ? authorizationTenantQual
+              : authorizationAppQual(table.name);
+          const names =
+            kind === 'authorization'
+              ? [
+                  'boundary',
+                  'select',
+                  'insert',
+                  ...(table.name === 'audit_event' ? [] : ['update']),
+                ]
+              : ['operation', 'audit_event'].includes(table.name)
+                ? []
+                : ['boundary', 'select'];
+          if (actual.length !== names.length)
+            findings.push(`AUTH_POLICY_COUNT:${kind}:${path}`);
+          for (const name of names) {
+            const policy = actual.find(
+              (value) => value.policyname === `${prefix}_${name}`,
+            );
+            const command = name === 'boundary' ? 'ALL' : name.toUpperCase();
+            const qual = name === 'insert' ? null : expected;
+            const check =
+              name === 'select' ? null : kind === 'app' ? 'false' : expected;
+            if (
+              !policy ||
+              policy.cmd !== command ||
+              policy.permissive !==
+                (name === 'boundary' ? 'RESTRICTIVE' : 'PERMISSIVE') ||
+              compact(policy.qual) !== compact(qual) ||
+              compact(policy.with_check) !== compact(check)
+            )
+              findings.push(`AUTH_POLICY_CONTRACT:${kind}:${path}:${name}`);
+          }
+        }
       }
       for (const role of roles) {
         if (role.unsafe) findings.push(`UNSAFE_ROLE:${role.kind}`);
@@ -186,6 +258,34 @@ export async function securityInvariants(source: DataSource) {
             )
               allowed.push('UPDATE');
           }
+          if (table.schema === 'authorization') {
+            if (
+              role.kind === 'app' &&
+              (authorizationCatalog.includes(table.name) ||
+                [
+                  'role',
+                  'role_permission',
+                  'role_assignment',
+                  'tenant_revision',
+                ].includes(table.name))
+            )
+              allowed.push('SELECT');
+            if (
+              role.kind === 'authorization' &&
+              (authorizationCatalog.includes(table.name) || authScoped)
+            ) {
+              allowed.push('SELECT');
+              if (authScoped) allowed.push('INSERT');
+              const updates: Record<string, string[]> = {
+                role: ['name', 'description', 'status', 'updated_at'],
+                role_permission: ['status', 'updated_at'],
+                role_assignment: ['status', 'updated_at'],
+                tenant_revision: ['revision'],
+                operation: ['result', 'completed_at'],
+              };
+              if (updates[table.name]?.includes(column)) allowed.push('UPDATE');
+            }
+          }
           const [acl] = await manager.query<
             {
               select: boolean;
@@ -233,6 +333,8 @@ export async function securityInvariants(source: DataSource) {
       'portal_sessions.sessions',
       'control_sessions.sessions',
       'memberships.audit_event',
+      'authorization.permission',
+      'authorization.catalog_version',
     ];
     const scopedContracts = [
       ...privateOrganizations.map((name) => `organizations.${name}`),
@@ -240,6 +342,7 @@ export async function securityInvariants(source: DataSource) {
       'organizations.tenant_directory',
       'organizations.audit_event',
       'organizations.operation',
+      ...authorizationScoped.map((table) => `authorization.${table}`),
     ];
     const expected = new Set([...exceptions, ...scopedContracts]);
     for (const path of expected)
@@ -291,7 +394,13 @@ export async function securityInvariants(source: DataSource) {
     for (const role of roles) {
       const permitted =
         role.kind === 'app'
-          ? ['foundation', 'identity', 'organizations', 'memberships']
+          ? [
+              'foundation',
+              'identity',
+              'organizations',
+              'memberships',
+              'authorization',
+            ]
           : role.kind === 'portal'
             ? ['portal_sessions']
             : role.kind === 'control'
@@ -300,7 +409,9 @@ export async function securityInvariants(source: DataSource) {
                 ? ['memberships']
                 : role.kind === 'organizations'
                   ? ['organizations']
-                  : [];
+                  : role.kind === 'authorization'
+                    ? ['authorization']
+                    : [];
       const usages = await manager.query<{ name: string; usage: boolean }[]>(
         "SELECT nspname AS name,has_schema_privilege($1,oid,'USAGE') AS usage FROM pg_namespace WHERE nspname=ANY($2)",
         [role.name, [...schemas, 'public']],
@@ -309,11 +420,22 @@ export async function securityInvariants(source: DataSource) {
         if (schema.usage !== permitted.includes(schema.name))
           findings.push(`SCHEMA_ACL:${role.kind}:${schema.name}`);
       const functions = await manager.query<{ name: string }[]>(
-        "SELECT n.nspname||'.'||p.proname AS name FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=ANY($1) AND has_function_privilege($2,p.oid,'EXECUTE')",
+        "SELECT n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')' AS name FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname=ANY($1) AND has_function_privilege($2,p.oid,'EXECUTE')",
         [schemas, role.name],
       );
       for (const fn of functions)
-        findings.push(`FUNCTION_ACL:${role.kind}:${fn.name}`);
+        if (!(
+          role.kind === 'authorization' &&
+          fn.name === 'authorization.require_operation()'
+        ))
+          findings.push(`FUNCTION_ACL:${role.kind}:${fn.name}`);
+      if (
+        role.kind === 'authorization' &&
+        !functions.some((fn) => fn.name === 'authorization.require_operation()')
+      )
+        findings.push(
+          'FUNCTION_REQUIRED:authorization:authorization.require_operation()',
+        );
       const sequences = await manager.query<
         { name: string; usage: boolean; read: boolean; write: boolean }[]
       >(

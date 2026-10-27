@@ -10,10 +10,12 @@ export type SecurityEvent =
   | 'DATABASE_OPERATION_FAILED'
   | 'TRUSTED_OPERATION_REJECTED'
   | 'TRUSTED_OPERATION_REPLAY'
-  | 'TRUSTED_OPERATION_CONFLICT';
+  | 'TRUSTED_OPERATION_CONFLICT'
+  | 'TRUSTED_OPERATION_CONTENTION';
 export const correlation = new AsyncLocalStorage<string>();
 export const canonicalUuid = (value: unknown): value is string =>
   typeof value === 'string' &&
+  value.length === 36 &&
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 export function correlationId(value: unknown): string {
   return canonicalUuid(value) ? value : randomUUID();
