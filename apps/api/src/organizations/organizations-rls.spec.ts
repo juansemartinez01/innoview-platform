@@ -1,3 +1,9 @@
+import {
+  organizationsDiagnosticFixture,
+  organizationReadFixture,
+  organizationsFixture,
+} from './organizations-fixture.spec.js';
+import { verifiedPrincipal } from '../authentication/verified-fixture.spec.js';
 import { organizationOperation } from '../operations/fixtures.spec.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
@@ -47,12 +53,13 @@ export async function verifyOrganizationsRls(
   env: Environment,
 ) {
   const operator = await initializeOrganizationsOperatorDataSource(env);
+  const diagnostic = await organizationsDiagnosticFixture(operator, env);
   const membershipOperator = await initializeMembershipOperatorDataSource(env);
   const single = createDataSource('app', env);
   single.setOptions({ poolSize: 1 });
   await single.initialize();
   try {
-    const writes = new OrganizationsService(operator);
+    const writes = await organizationsFixture(operator, env);
     const reads = new OrganizationsService(app);
     const memberships = new MembershipsService(app);
     const membershipWrites = new MembershipsService(membershipOperator);
@@ -64,13 +71,9 @@ export async function verifyOrganizationsRls(
       new MembershipsService(single),
       new OrganizationsService(single),
     );
-    const principalA = {
-      issuer: 'https://organizations-rls.invalid',
-      subject: randomUUID(),
-      clientId: 'innoview-portal',
-    };
-    const principalB = { ...principalA, subject: randomUUID() };
-    const principalEmpty = { ...principalA, subject: randomUUID() };
+    const principalA = await verifiedPrincipal();
+    const principalB = await verifiedPrincipal();
+    const principalEmpty = await verifiedPrincipal();
     const aIdentity = await identities.resolve(principalA);
     const bIdentity = await identities.resolve(principalB);
     await identities.resolve(principalEmpty);
@@ -132,7 +135,7 @@ export async function verifyOrganizationsRls(
         >(
           "SELECT relrowsecurity,relforcerowsecurity FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='organizations' AND c.relkind='r'",
         );
-        assert.equal(catalog.length, 8);
+        assert.equal(catalog.length, 10);
         assert.ok(
           catalog.every((row) => row.relrowsecurity && row.relforcerowsecurity),
         );
@@ -422,8 +425,10 @@ export async function verifyOrganizationsRls(
           denied,
         );
         await assert.rejects(
-          operator.query(
-            'UPDATE organizations.tenant_directory SET available=false',
+          organizationReadFixture(operator, a.tenant.id, (manager) =>
+            manager.query(
+              'UPDATE organizations.tenant_directory SET available=false',
+            ),
           ),
           denied,
         );
@@ -434,7 +439,7 @@ export async function verifyOrganizationsRls(
           ),
           denied,
         );
-        const before = await operator.query<{ n: number }[]>(
+        const before = await diagnostic.query<{ n: number }[]>(
           'SELECT count(*)::int AS n FROM organizations.audit_event',
         );
         await assert.rejects(
@@ -446,12 +451,12 @@ export async function verifyOrganizationsRls(
           OrganizationOperationError,
         );
         assert.deepEqual(
-          await operator.query(
+          await diagnostic.query(
             'SELECT count(*)::int AS n FROM organizations.audit_event',
           ),
           before,
         );
-        const events = await operator.query<
+        const events = await diagnostic.query<
           { actor: string; db_actor: string; request_id: string }[]
         >(
           'SELECT actor,db_actor,request_id FROM organizations.audit_event WHERE tenant_id=$1',
@@ -463,7 +468,10 @@ export async function verifyOrganizationsRls(
             (event) =>
               event.actor &&
               event.request_id &&
-              event.db_actor === env.DB_ORGANIZATIONS_USER,
+              [
+                env.DB_ORGANIZATIONS_USER,
+                env.DB_ORGANIZATIONS_PROVISIONER_USER,
+              ].includes(event.db_actor),
           ),
         );
       },

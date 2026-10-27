@@ -72,11 +72,11 @@ export class IdentityVerifier {
       !['innoview-portal', 'innoview-control-center'].includes(payload.azp)
     )
       throw new Error('Invalid access token');
-    const principal = {
+    const principal = Object.freeze({
       issuer: payload.iss!,
       subject: payload.sub,
       clientId: payload.azp,
-    };
+    });
     verifiedPrincipals.add(principal);
     return principal;
   }

@@ -1,3 +1,5 @@
+import { organizationsFixture } from '../organizations/organizations-fixture.spec.js';
+import { verifiedPrincipal } from '../authentication/verified-fixture.spec.js';
 import { organizationOperation } from '../operations/fixtures.spec.js';
 import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import assert from 'node:assert/strict';
@@ -26,7 +28,7 @@ export async function verifyContextPersistence(
     const identities = new IdentityService(app);
     const memberships = new MembershipsService(app);
     const trusted = new MembershipsService(operator);
-    const organizations = new OrganizationsService(organizationOperator);
+    const organizations = await organizationsFixture(organizationOperator, env);
     const transactions = new IdentityReadTransactions(app, identities);
     const contexts = new ContextService(
       transactions,
@@ -38,11 +40,7 @@ export async function verifyContextPersistence(
         new OrganizationsService(app),
       ),
     );
-    const principal = {
-      issuer: 'https://context-fixture.invalid',
-      subject: randomUUID(),
-      clientId: 'innoview-portal',
-    };
+    const principal = await verifiedPrincipal();
     const identity = await identities.resolve(principal);
     const a = await organizations.createTenant(
       'Snapshot context A',

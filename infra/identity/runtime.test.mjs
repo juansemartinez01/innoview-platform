@@ -32,8 +32,11 @@ const requireBff = createRequire(
 const { unsealData, sealData } = requireBff('iron-session');
 const { provisionDatabase } =
   await import('../../apps/api/dist/persistence/provision.js');
-const { createDataSource, initializeOrganizationsOperatorDataSource } =
-  await import('../../apps/api/dist/persistence/data-sources.js');
+const {
+  createDataSource,
+  initializeOrganizationsOperatorDataSource,
+  initializeOrganizationsProvisionerDataSource,
+} = await import('../../apps/api/dist/persistence/data-sources.js');
 const { Store, hash } =
   await import('../../packages/identity-bff/dist/store.js');
 const { configuration } =
@@ -135,6 +138,10 @@ await test(
       DB_ORGANIZATIONS_PASSWORD: secret(),
       DB_AUTHORIZATION_USER: `test_authorization_${suffix}`,
       DB_AUTHORIZATION_PASSWORD: secret(),
+      DB_ORGANIZATIONS_PROVISIONER_USER: `test_org_provisioner_${suffix}`,
+      DB_ORGANIZATIONS_PROVISIONER_PASSWORD: secret(),
+      DB_DIRECTORY_MAINTENANCE_USER: `test_directory_${suffix}`,
+      DB_DIRECTORY_MAINTENANCE_PASSWORD: secret(),
       PORTAL_COOKIE_PASSWORD: secret(),
       PORTAL_TOKEN_PASSWORD: secret(),
       CONTROL_COOKIE_PASSWORD: secret(),
@@ -758,6 +765,8 @@ await test(
             'business_group',
             'catalog_version',
             'company',
+            'directory_repair_event',
+            'directory_repair_operation',
             'membership',
             'migrations',
             'operation',
@@ -804,8 +813,10 @@ await test(
           const { OrganizationsService } =
             await import('../../apps/api/dist/organizations/organizations.service.js');
           const source = await initializeOrganizationsOperatorDataSource(env);
+          const provisioner =
+            await initializeOrganizationsProvisionerDataSource(env);
           try {
-            const service = new OrganizationsService(source);
+            const service = new OrganizationsService(source, provisioner);
             for (const label of ['Route fixture A', 'Route fixture B']) {
               const structure = await service.createTenant(
                 label,
@@ -835,6 +846,7 @@ await test(
               }
             }
           } finally {
+            await provisioner.destroy();
             await source.destroy();
           }
         },
@@ -994,7 +1006,6 @@ await test(
         portal,
         control,
       });
-      await verifyAccessHttp(t, { env, login, Browser, migrator, sensitive });
       await t.test(
         'state and nonce tampering consume the transaction and cannot establish a session',
         async () => {
@@ -1277,6 +1288,9 @@ await test(
           }
         },
       );
+      // Terminal destructive catalog partition: only secret-leak assertions and
+      // disposal follow. No other test observes the deprecated global probe.
+      await verifyAccessHttp(t, { env, login, Browser, migrator, sensitive });
       await t.test(
         'no passwords or tokens in application logs or BFF browser responses',
         () => {
@@ -1318,6 +1332,8 @@ await test(
           'DB_MEMBERSHIP_USER',
           'DB_ORGANIZATIONS_USER',
           'DB_AUTHORIZATION_USER',
+          'DB_ORGANIZATIONS_PROVISIONER_USER',
+          'DB_DIRECTORY_MAINTENANCE_USER',
         ])
           await bootstrap.query(`DROP ROLE ${pg.escapeIdentifier(env[key])}`);
       }

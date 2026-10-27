@@ -1,5 +1,23 @@
 # Arquitectura técnica — v0.3
 
+## Fronteras y recuperación — contrato vigente 2.5 / ADR-042
+
+2.4 aprobado en 07f6b59258306bf67074b402cd71145707c83283. 2.5 permanece sujeto a revisión, sin cierre oficial ni administración delegada.
+
+El punto profundo IdentityReadTransactions exige isVerifiedPrincipal antes de adquirir conexión. Authentication emite objetos inmutables desde JWT/JWKS verificado; ni la forma TypeScript, un literal o un spread conservan procedencia. Context/TenantReadTransactions/AuthorizationReads componen esa misma identidad y manager; siguen RR/read-only, GUC LOCAL canónicos y contexto acotado al callback. No hay bypass de fixtures: sus JWT son firmados/verificados; HTTP y Chromium usan Keycloak real.
+
+Organizations ordinario queda tenant-scoped en sus ocho tablas previas, con fronteras AS RESTRICTIVE UUID y ENABLE/FORCE. CREATE_TENANT usa exclusivamente organizations_provisioner, operación pendiente por request, UUID candidato interno y Tenant+GROUP+directorio atómicos; no puede crear Company/Branch ni modificar estados. El mismo OrganizationsService admite una fuente pretenant adicional solo en consumidores técnicos explícitos; el provider público no la recibe. El historial CREATE_TENANT se reproduce con esa capacidad por request, sin mover datos. Dos credenciales nunca son intercambiables.
+
+Directory maintenance es una capacidad aislada de diagnóstico/recuperación, con lectura explícita de fuentes mínimas del directorio e historial técnico; sin lectura Company/Branch, DML sobre fuentes o acceso a otros módulos/sesiones. Solo escribe tenant_directory y sus registros propios de reparación bajo operación pendiente, contexto tenant y triggers invocantes. La lectura global de diagnóstico es una excepción deliberada, inaccesible al escritor ordinario/API/BFF. No RLS bypass ni SECURITY DEFINER.
+
+Un gate asesor transaccional por tenant precede locks de fila tanto en el wrapper de escritura como en un trigger aa_organization_write_gate anterior a los demás triggers. Reparación READ COMMITTED toma ese mismo gate antes de comparar fuente; espera commits y evita reconciliar contra un snapshot anterior a la espera. No llamadas HTTP dentro de SQL. Hash collisions pueden serializar tenants sin conceder datos. Timeouts/rollback acotan contención.
+
+Authorization conserva scopes exactos, FK, RLS, semántica de snapshots y ausencia de caché entre requests. Las huellas históricas v2 se calculan según fingerprint_version persistido, con serializador congelado. DEPRECATED_PERMISSION_USED deriva de grants históricos del contexto actual aún disponibles salvo el estado del catálogo; no de la mera existencia global del código. Se agrega una sola señal por request sin código/identidad. permissionsFor/scopesFor son el contrato de colecciones; no can por fila ni eliminación de sus controles runtime.
+
+CompanyDemonstrationGuard está vinculado a clase y handler concretos. Cada módulo futuro debe implementar la operación autorizada completa dentro de su transacción, no decorar un handler arbitrario ni reutilizar una decisión fuera del snapshot. Errores no transitorios son 500 seguros/INTERNAL_ERROR, transitorios reconocidos 503/Retry-After, manteniendo 401 y 403/404. Control Center continúa técnico y sin administración.
+
+Los apartados siguientes conservan antecedentes; ADR-042 sustituye únicamente los controles explícitamente descritos aquí.
+
 ## Evaluación empresarial — contrato vigente 2.4 / ADR-041
 
 2.3b.1 aprobado en 9ab0810. E-1 se ejecutó primero: migración 12 actualiza14políticas app a comparación UUID indexable, preservando ENABLE/FORCE, RESTRICTIVE y privilegios. Prueba representativa schema 11→12 mantiene visibilidad/denegaciones y utiliza ix_membership_identity_status sin hints. Las políticas operativas no cambian.

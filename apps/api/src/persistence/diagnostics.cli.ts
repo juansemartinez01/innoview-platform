@@ -1,10 +1,10 @@
-import { initializeOrganizationsOperatorDataSource } from './data-sources.js';
+import { initializeDirectoryMaintenanceDataSource } from './data-sources.js';
 import {
   directoryDifferences,
   securityInvariants,
 } from './security-diagnostics.js';
 try {
-  const source = await initializeOrganizationsOperatorDataSource();
+  const source = await initializeDirectoryMaintenanceDataSource();
   try {
     const invariants = await securityInvariants(source);
     const directory = await source.transaction(

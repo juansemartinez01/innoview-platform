@@ -10,7 +10,13 @@ import { connectionConfig, type Environment } from './connection.config.js';
 
 export function createDataSource(
   purpose:
-    'app' | 'migrator' | 'membership' | 'organizations' | 'authorization',
+    | 'app'
+    | 'migrator'
+    | 'membership'
+    | 'organizations'
+    | 'authorization'
+    | 'organizations_provisioner'
+    | 'directory_maintenance',
   env: Environment = process.env,
 ): DataSource {
   const config = connectionConfig(purpose, env);
@@ -28,7 +34,11 @@ export function createDataSource(
     schema:
       purpose === 'authorization'
         ? 'authorization'
-        : purpose === 'organizations'
+        : [
+              'organizations',
+              'organizations_provisioner',
+              'directory_maintenance',
+            ].includes(purpose)
           ? 'organizations'
           : purpose === 'membership'
             ? 'memberships'
@@ -60,7 +70,13 @@ export function createDataSource(
 }
 
 async function initializeRestrictedDataSource(
-  purpose: 'app' | 'membership' | 'organizations' | 'authorization',
+  purpose:
+    | 'app'
+    | 'membership'
+    | 'organizations'
+    | 'authorization'
+    | 'organizations_provisioner'
+    | 'directory_maintenance',
   env: Environment = process.env,
 ): Promise<DataSource> {
   const source = createDataSource(purpose, env);
@@ -141,4 +157,15 @@ export async function validateMigratorConnection(
   } finally {
     if (source.isInitialized) await source.destroy();
   }
+}
+
+export function initializeOrganizationsProvisionerDataSource(
+  env: Environment = process.env,
+) {
+  return initializeRestrictedDataSource('organizations_provisioner', env);
+}
+export function initializeDirectoryMaintenanceDataSource(
+  env: Environment = process.env,
+) {
+  return initializeRestrictedDataSource('directory_maintenance', env);
 }

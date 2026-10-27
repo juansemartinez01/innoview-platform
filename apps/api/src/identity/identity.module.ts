@@ -1,3 +1,4 @@
+import { transientFailure } from '../operations/operation-context.js';
 import { securityEvent, databaseFailure } from '../security/security-events.js';
 import {
   BadRequestException,
@@ -18,6 +19,7 @@ import { DataSource, type EntityManager } from 'typeorm';
 import {
   AuthenticationGuard,
   AuthenticationModule,
+  isVerifiedPrincipal,
   type IdentityRequest,
   type Principal,
 } from '../authentication/authentication.module.js';
@@ -48,6 +50,7 @@ export class IdentityService {
         externalSubject: principal.subject,
       });
     } catch (error) {
+      if (!transientFailure(error)) throw error;
       securityEvent(databaseFailure(error));
       throw new ServiceUnavailableException('Identity persistence unavailable');
     }
@@ -78,6 +81,7 @@ export class IdentityService {
         externalSubject: principal.subject,
       });
     } catch (error) {
+      if (!transientFailure(error)) throw error;
       securityEvent(databaseFailure(error));
       throw new ServiceUnavailableException('Identity persistence unavailable');
     }
@@ -100,6 +104,7 @@ export class IdentityReadTransactions {
     principal: Principal,
     operation: (manager: EntityManager, identityId: string) => Promise<T>,
   ): Promise<T | null> {
+    if (!isVerifiedPrincipal(principal)) return null;
     return this.source.transaction('REPEATABLE READ', async (manager) => {
       await manager.query('SET TRANSACTION READ ONLY');
       // A clean local scope also protects the initial lookup from any inherited
@@ -107,16 +112,6 @@ export class IdentityReadTransactions {
       await manager.query(
         "SELECT set_config('innoview.user_identity_id','',true), set_config('innoview.tenant_id','',true)",
       );
-      if (
-        !principal ||
-        typeof principal.issuer !== 'string' ||
-        !principal.issuer ||
-        typeof principal.subject !== 'string' ||
-        !principal.subject ||
-        typeof principal.clientId !== 'string' ||
-        !principal.clientId
-      )
-        return null;
       const identityId = await this.identities.findReference(
         principal,
         manager,

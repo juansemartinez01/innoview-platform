@@ -1,3 +1,9 @@
+import {
+  organizationsProvisionerFixture,
+  organizationReadFixture,
+  organizationsFixture,
+  organizationsDiagnosticFixture,
+} from './organizations-fixture.spec.js';
 import { organizationOperation } from '../operations/fixtures.spec.js';
 import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import type { EntityManager } from 'typeorm';
@@ -35,23 +41,37 @@ export async function verifyOrganizations(
   env: Environment,
 ) {
   const operator = await initializeOrganizationsOperatorDataSource(env);
-  const service = new OrganizationsService(operator);
+  const service = await organizationsFixture(operator, env);
+  const diagnostic = await organizationsDiagnosticFixture(operator, env);
+  const pretenant = await organizationsProvisionerFixture(operator, env);
   let integrityTenant = '';
-  const transaction = <T>(operation: (manager: EntityManager) => Promise<T>) =>
-    operator.transaction(async (manager) => {
+  const transaction = <T>(
+    operation: (manager: EntityManager) => Promise<T>,
+    tenantId = integrityTenant,
+    provision = false,
+  ) =>
+    (provision ? pretenant : operator).transaction(async (manager) => {
+      await manager.query("SELECT set_config('innoview.tenant_id',$1,true)", [
+        tenantId,
+      ]);
       const request = randomUUID();
       await manager.query(
         "SELECT set_config('innoview.organization_actor','fixture:integrity',true),set_config('innoview.organization_request',$1,true),set_config('innoview.organization_reason','Integrity fixture',true),set_config('innoview.organization_actor_type','SYSTEM',true)",
         [request],
       );
       await manager.query(
-        "INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source) VALUES($1,$2,'CREATE_COMPANY',$3,'fixture:integrity','SYSTEM','Integrity fixture','isolated fixture')",
-        [request, integrityTenant, '0'.repeat(64)],
+        "INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source) VALUES($1,$2,$4,$3,'fixture:integrity','SYSTEM','Integrity fixture','isolated fixture')",
+        [
+          request,
+          provision ? null : tenantId,
+          '0'.repeat(64),
+          provision ? 'CREATE_TENANT' : 'CREATE_COMPANY',
+        ],
       );
       const result = await operation(manager);
       await manager.query(
-        "UPDATE organizations.operation SET result='{}',completed_at=clock_timestamp() WHERE request_id=$1",
-        [request],
+        "UPDATE organizations.operation SET tenant_id=$2,result='{}',completed_at=clock_timestamp() WHERE request_id=$1",
+        [request, tenantId],
       );
       return result;
     });
@@ -60,8 +80,30 @@ export async function verifyOrganizations(
     parameters?: unknown[],
   ): Promise<T> =>
     sql.startsWith('SELECT')
-      ? operator.query<T>(sql, parameters)
-      : transaction((manager) => manager.query<T>(sql, parameters));
+      ? diagnostic.query<T>(sql, parameters)
+      : sql.startsWith('INSERT INTO organizations.tenant')
+        ? (() => {
+            const id = parameters?.[0] ?? randomUUID();
+            assert.ok(typeof id === 'string');
+            const statement = parameters?.length
+              ? sql
+              : sql
+                  .replace('tenant(name)', 'tenant(id,name)')
+                  .replace(
+                    "VALUES ('Missing group')",
+                    "VALUES ($1,'Missing group')",
+                  );
+            return transaction(
+              (manager) =>
+                manager.query<T>(
+                  statement,
+                  parameters?.length ? parameters : [id],
+                ),
+              id,
+              true,
+            );
+          })()
+        : transaction((manager) => manager.query<T>(sql, parameters));
   try {
     const a = await service.createTenant(
       'Fixture A',
@@ -98,11 +140,15 @@ export async function verifyOrganizations(
     await t.test(
       'Organizations: two independent complete tenants and derived hierarchy with one status owner',
       async () => {
-        const first = await operator.transaction((manager) =>
-          service.getStructure(a.tenant.id, manager),
+        const first = await organizationReadFixture(
+          operator,
+          a.tenant.id,
+          (manager) => service.getStructure(a.tenant.id, manager),
         );
-        const second = await operator.transaction((manager) =>
-          service.getStructure(b.tenant.id, manager),
+        const second = await organizationReadFixture(
+          operator,
+          b.tenant.id,
+          (manager) => service.getStructure(b.tenant.id, manager),
         );
         assert.equal(first.group.id, a.unit.id);
         assert.deepEqual(first.units.map((u) => u.type).sort(), [
@@ -152,17 +198,21 @@ export async function verifyOrganizations(
           (error) => state(error, '23505'),
         );
         await assert.rejects(
-          transaction(async (manager) => {
-            const id = randomUUID();
-            await manager.query(
-              "INSERT INTO organizations.organizational_unit(id,tenant_id,type,name) VALUES ($1,$2,'GROUP','Second')",
-              [id, a.tenant.id],
-            );
-            await manager.query(
-              'INSERT INTO organizations.business_group(tenant_id,id) VALUES ($1,$2)',
-              [a.tenant.id, id],
-            );
-          }),
+          transaction(
+            async (manager) => {
+              const id = randomUUID();
+              await manager.query(
+                "INSERT INTO organizations.organizational_unit(id,tenant_id,type,name) VALUES ($1,$2,'GROUP','Second')",
+                [id, a.tenant.id],
+              );
+              await manager.query(
+                'INSERT INTO organizations.business_group(tenant_id,id) VALUES ($1,$2)',
+                [a.tenant.id, id],
+              );
+            },
+            a.tenant.id,
+            true,
+          ),
           (error) => state(error, '23505'),
         );
         await assert.rejects(
@@ -219,7 +269,7 @@ export async function verifyOrganizations(
             'INSERT INTO organizations.branch(tenant_id,id,company_id) VALUES ($1,$2,$3)',
             [b.tenant.id, ab.branch.id, bc.company.id],
           ),
-          (error) => state(error, '23503'),
+          (error) => state(error, '23514', '42501'),
         );
         await assert.rejects(
           service.createCompany(
@@ -321,17 +371,21 @@ export async function verifyOrganizations(
         const unitId = randomUUID();
         const tenantId = randomUUID();
         await assert.rejects(
-          transaction(async (manager) => {
-            await manager.query(
-              "INSERT INTO organizations.tenant(id,name) VALUES ($1,'Incomplete')",
-              [tenantId],
-            );
-            await manager.query(
-              "INSERT INTO organizations.organizational_unit(id,tenant_id,type,name) VALUES ($1,$2,'GROUP','Incomplete')",
-              [unitId, tenantId],
-            );
-            // No typed group: statement succeeds, deferred constraint fails at commit.
-          }),
+          transaction(
+            async (manager) => {
+              await manager.query(
+                "INSERT INTO organizations.tenant(id,name) VALUES ($1,'Incomplete')",
+                [tenantId],
+              );
+              await manager.query(
+                "INSERT INTO organizations.organizational_unit(id,tenant_id,type,name) VALUES ($1,$2,'GROUP','Incomplete')",
+                [unitId, tenantId],
+              );
+              // No typed group: statement succeeds, deferred constraint fails at commit.
+            },
+            tenantId,
+            true,
+          ),
           (error) => state(error, '23514'),
         );
         assert.equal(
@@ -370,8 +424,10 @@ export async function verifyOrganizations(
           ),
         );
         assert.equal(new Set(results.map((r) => r.company.id)).size, 6);
-        const structure = await operator.transaction((manager) =>
-          service.getStructure(a.tenant.id, manager),
+        const structure = await organizationReadFixture(
+          operator,
+          a.tenant.id,
+          (manager) => service.getStructure(a.tenant.id, manager),
         );
         assert.equal(structure.companies.length, 7);
         assert.equal(
@@ -389,6 +445,7 @@ export async function verifyOrganizations(
           'State group',
           organizationOperation(),
         );
+        integrityTenant = lifecycle.tenant.id;
         const company = await service.createCompany(
           lifecycle.tenant.id,
           lifecycle.group.id,
@@ -417,8 +474,10 @@ export async function verifyOrganizations(
           ),
           OrganizationOperationError,
         );
-        const structure = await operator.transaction((manager) =>
-          service.getStructure(lifecycle.tenant.id, manager),
+        const structure = await organizationReadFixture(
+          operator,
+          lifecycle.tenant.id,
+          (manager) => service.getStructure(lifecycle.tenant.id, manager),
         );
         assert.equal(
           structure.units.find((u) => u.id === branch.branch.id)?.status,

@@ -4,6 +4,12 @@ export const CURRENT_FINGERPRINT_VERSION = 2 as const;
 // v2 uses typed nodes, so undefined/absent/null and user objects cannot collide
 // with serializer markers. No getters, toJSON, class instances or sparse arrays.
 export function canonicalArguments(value: unknown): string {
+  return canonicalArgumentsV2(value);
+}
+
+// Frozen typed-node serializer for persisted v2 hashes; future versions must
+// add a new serializer, never change this historical byte representation.
+export function canonicalArgumentsV2(value: unknown): string {
   const ancestors = new Set<object>();
   function encode(input: unknown): unknown {
     if (input === undefined) return ['undefined'];
@@ -69,7 +75,7 @@ export function operationFingerprint(
       ),
     });
   } else if (version === 2)
-    serialized = canonicalArguments({ version: 2, type, args });
+    serialized = canonicalArgumentsV2({ version: 2, type, args });
   else throw new Error('Unsupported fingerprint version');
   return createHash('sha256').update(serialized).digest('hex');
 }

@@ -1,5 +1,22 @@
 # Modelo de datos — diseño inicial, no migración definitiva
 
+## Actualización 2.5 — ADR-042
+
+Migraciones 13 `OrganizationOperationalBoundaries1793131200000` y 14 `DirectoryRepair1793134800000`, aditivas/transaccionales. No se editan las doce anteriores ni se crean entidades empresariales o permisos del catálogo.
+
+Las tablas Organizations conservan datos, FK y estados. El operador ordinario utiliza tenant UUID LOCAL y frontera RESTRICTIVE. El provisioner solo crea Tenant/GROUP y datos derivados bajo CREATE_TENANT pendiente; UPDATE(id) sobre Tenant permite locks de integridad, pero el guard rechaza modificaciones de datos desde esa capacidad. Maintenance no escribe fuentes ni lee Company/Branch.
+
+| Tabla técnica nueva                      | Contrato                                                                                                                                                                                                                                                                                              |
+| ---------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| organizations.directory_repair_operation | request_id UUID PK global; tenant_id UUID; actor/tipo/motivo; fingerprint y backup_sha256; fechas y result JSONB. Completitud diferida al commit, resultado histórico inmutable. Sin FK a Tenant para representar incluso una reparación de sobrante, normalmente impedido por las FK del directorio. |
+| organizations.directory_repair_event     | UUID; FK (tenant_id,request_id) al registro; before_state/after_state JSONB, db_actor y fecha. Derivada por trigger, append-only.                                                                                                                                                                     |
+
+Ambas tienen ENABLE/FORCE y frontera tenant RESTRICTIVE. Maintenance tiene SELECT/INSERT y UPDATE(result,completed_at) únicamente en operación; DELETE solo sobre la proyección bajo operación pendiente/contexto. No DDL, ownership ni acceso a sesiones u otros módulos. El inventario descubre y clasifica las relaciones reales, sin un conteo fijo como garantía.
+
+Authorization.operation continúa en fingerprint_version=2, primera versión real del módulo. El dispatcher usa la versión persistida y el serializador histórico congelado: replay no modifica huella, resultado, eventos ni revisión. Una futura versión requiere migración/compatibilidad aditiva, nunca inventar Auth v1 o reescribir registros. Catalog/revisión tenant no sustituyen disponibilidad de Memberships/Organizations.
+
+Restore a otro nombre físico remapea actores de policies a roles independientes y actualiza solo database de typeorm_metadata. No reatribuye db_actor ni modifica resultados/auditorías históricos. Se verifican FK, constraints, RLS, ACL, triggers, migraciones y schema diff tras restaurar.
+
 ## Actualización 2.4 / ADR-041
 
 Migración12 `IndexableIdentityTenantRls1793124000000`, aditiva/transaccional: cambia USING de app SELECT/RESTRICTIVE en Membership, directorio y cinco tablas Organizations; conserva WITH CHECK(false), roles/permisos, ENABLE/FORCE y políticas operativas. UUID=contexto UUID validado por CASE, nunca columna_uuid::text en esas igualdades. Ausencia/vacío/formato inválido produce NULL/denegación, sin 22P02. Down solo restaura las expresiones anteriores en bases descartables; migraciones 1–11 intactas. No hay tablas, índices, columnas, seeds habituales ni credenciales nuevas.

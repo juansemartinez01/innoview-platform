@@ -1,4 +1,90 @@
-# Operaciones técnicas y diagnóstico — contrato vigente 2.4
+# Operaciones técnicas y diagnóstico — contrato vigente 2.5
+
+## 2.5 — orden de actualización y responsabilidades
+
+Base 2.4 aprobada `07f6b59258306bf67074b402cd71145707c83283`; 2.5 pendiente de revisión humana. ADR-042 y SECURITY_AND_RECOVERY.md tienen precedencia sobre procedimientos históricos de abajo. No cerrar oficialmente Fase 2 ni iniciar administración delegada.
+
+Un operador Innoview confiable realiza aprovisionamiento/backup/repair fuera de HTTP. Debe conservar actor, motivo y requestId antes de actuar; reintentos usan los mismos argumentos/backup/request, nunca otro ID para ocultar un conflicto. No usar roles operativos como credenciales de API o BFF.
+
+Agregar a `.env` los dos pares de `.env.example`: DB_ORGANIZATIONS_PROVISIONER_USER/PASSWORD y DB_DIRECTORY_MAINTENANCE_USER/PASSWORD. Usuarios y contraseñas nuevos e independientes de todos los anteriores. No imprimir valores ni ponerlos en comandos/documentación/versionado. Detener API/BFF/escritores y respaldar antes de aplicar:
+
+```powershell
+pnpm install --frozen-lockfile
+docker compose up -d --wait --wait-timeout 240
+pnpm db:backup --directory C:\Backups\Innoview
+pnpm db:provision
+pnpm db:run
+pnpm db:provision
+pnpm db:show
+pnpm db:diagnose
+pnpm db:generate src/persistence/migrations/SchemaCheck --check
+pnpm dev
+```
+
+Migraciones13/14 aditivas; conservar datos/sesiones/volúmenes y las doce anteriores. No ejecutar down en entorno habitual. Reaprovisionar elimina grants anteriores amplios y configura nuevos pools; reiniciar operadores/servidores. Bootstrap sigue solo administrativo, migrador solo migraciones/catálogo, Memberships/Authorization independientes. El diagnóstico ahora usa Directory maintenance, no el escritor Organizations ordinario.
+
+### Alta pretenant y operaciones ordinarias
+
+```powershell
+pnpm organizations:provision-tenant --name "Tenant técnico" --group "Grupo técnico" --actor "operador:identificador-aprobado" --reason "Motivo aprobado" --request-id "<UUID guardado para esta operación>"
+```
+
+Ese comando solo recibe credencial pretenant. No lo ejecutar como seed ni por login; no crea Membership, roles o permisos. Operaciones Company/Branch/estado continúan mediante OrganizationsService con su fuente ordinaria y contexto técnico explícito. El wrapper fija tenant LOCAL antes de locks/INSERT ON CONFLICT. Las lecturas internas ordinarias deben establecer su tenant LOCAL y usar el mismo manager; SQL sin contexto ya no es diagnóstico global. CREATE_TENANT histórico se reproduce con la capacidad pretenant, las demás operaciones con la ordinaria.
+
+### Diagnóstico y reparación soportada del directorio
+
+```powershell
+pnpm directory:maintain
+pnpm directory:maintain --tenant "<tenant UUID canónico>"
+pnpm directory:maintain --confirm-repair --tenant "<tenant UUID>" --actor "operador:identificador-aprobado" --reason "Incidente y motivo aprobados" --request-id "<UUID guardado>" --backup "C:\Backups\Innoview\innoview-<UUID>.dump.json"
+```
+
+Sin confirmación no escribe. Diagnóstico devuelve UUID/tipos de diferencia solo al operador local, no datos empresariales o HTTP. Repair necesita archivo custom real PGDMP y SHA/manifiesto coincidente con host/puerto/base; no basta un string de hash. Elegir backup confiable, revisar/restaurar en ensayo antes de intervención y conservarlo con ACL privadas. La herramienta de backup soporta solo contenedores locales documentados; en fixtures admite `--project innoview-platform-test --service postgres-test` o el proyecto limpio generado. No es backup/PITR productivo ni incluye Keycloak, roles globales o claves BFF.
+
+Ledger propio y eventos guardan actor/tipo/motivo/request, hash de backup, estados antes/después y rol DB. Repair es READ COMMITTED, adquiere gate de escritura del tenant antes de comparar y vuelve a diagnosticar; el gate también se aplica en triggers antes de locks de fila. Fuente estable tras la espera, sin UPDATE sobre fuentes ni locks globales/credenciales migradoras. Timeout revierte todo. Un replay equivalente devuelve resultado histórico sin otro evento; no es una lectura de salud actual: ejecutar diagnóstico nuevo después.
+
+La comparación detecta faltantes, errores y sobrantes; las FK actuales impiden insertar sobrantes válidos y las pruebas no las desactivan. Si la fuente está incompleta, la reparación se rechaza. No inventar estructura ni modificar tablas autoritativas desde el mantenedor. Una reparación confirmada no se borra: corregir fuente por su contrato si corresponde y realizar compensación autorizada con nuevo backup/request y evidencia. Nunca eliminar auditorías ni restaurar una proyección incorrecta para simular rollback.
+
+### Ensayos descartables, matriz y CI
+
+```powershell
+docker compose -f compose.test.yaml up -d --wait --wait-timeout 180
+pnpm security:matrix after
+pnpm exec node --env-file-if-exists=.env infra/authorization/adversarial-probes.mjs after
+pnpm authorization:rls:benchmark
+pnpm authorization:benchmark
+pnpm authorization:benchmark:wide
+pnpm authorization:benchmark:compare
+docker compose -f compose.test.yaml down
+pnpm foundation:verify-clean
+```
+
+La matriz conserva `infra/authorization/evidence/adversarial-before.json` (147 resultados, base aprobada) y sondas iniciales con tres resultados inseguros reproducidos. After reejecuta la misma regresión y añade controles correctivos. Clasificar rechazo PostgreSQL, servicio y evaluador por separado; las capas no son equivalentes. El ensayo SQL permite distinguir una FK válida de una concesión realmente efectiva.
+
+`pnpm test` incluye backup/restore real de datos sintéticos, reparación, replay, schema diff y API restaurada. pg_restore recibe una base diferente generada, sin --clean: roles nuevos, schemas vacíos aprovisionados, objetos bajo migrador, policies remapeadas, metadata física y ACL reconciliadas. Historial/db_actor original intactos. Comprobar findings=[], directoryDifferences=0, FK/constraints/migraciones y lectura HTTP permitida/denegada. No restaurar sobre DB_NAME habitual. El backup contiene datos: no versionarlo; la fixture borra únicamente su directorio temporal verificado y sus bases/roles generados.
+
+`foundation:verify-clean` crea árbol temporal sin .env/outputs/dependencias, instala frozen, levanta Compose único de tres servicios tmpfs (Platform PG, Identity PG, Keycloak), build y tests reales incluidos OIDC idempotente, API/BFF/login/contexto/RBAC/Chromium/recuperación. Solo secretos efímeros/inyección TEST_*; no usa volúmenes habituales. CI agrega job independiente Clean install and recovery drill. Si falla cleanup, inspeccionar ese proyecto generado, nunca eliminar volúmenes de desarrollo para resolverlo.
+
+### Benchmark F-6
+
+Artefactos: benchmark-result.json (2 permisos/rol), benchmark-wide-result.json (40) y benchmark-width-comparison.json; semilla/SQL/EXPLAIN completos. Mismos500 tenants,50.000 asignaciones y2.016 roles; RolePermission pasa de4.032a80.640. Grants duplicados por roles/scopes no duplican conjuntos finales, comparados completos con oráculo congelado. Catálogo adicional solo migrador en base descartable; ningún seed habitual.
+
+Metodología: VACUUM(ANALYZE), tres warmups y30 repeticiones, tiempos de método y transacción separados. La primera observación tras carga/planes no es frío OS/PG: no hubo flush. Host Windows/Docker Desktop compartido; dos puntos no demuestran una ley asintótica ni SLA. Campos memoria/spill se registran solo si PostgreSQL los reporta; buffers/filas anidados son inclusivos y no se suman como costos independientes. No umbrales temporales CI ni índices nuevos especulativos. Mediciones y análisis final en el artefacto de comparación; el apartado histórico2.4 debajo conserva sus números originales.
+
+Resultados locales del método p50/p95 en milisegundos (transacción completa y primera observación en JSON):
+
+| Tenant / método          | 2 permisos    | 40 permisos     |
+| ------------------------ | ------------- | --------------- |
+| Grande / can             | 4,029 / 4,389 | 4,574 / 5,115   |
+| Grande / permissionsFor  | 7,606 / 8,630 | 37,863 / 39,605 |
+| Grande / scopesFor       | 6,214 / 6,691 | 7,345 / 8,027   |
+| Pequeño / can            | 4,049 / 4,413 | 4,030 / 4,299   |
+| Pequeño / permissionsFor | 4,433 / 5,493 | 7,193 / 8,104   |
+| Pequeño / scopesFor      | 4,138 / 4,649 | 4,614 / 5,159   |
+
+Can grande usa assignment_member_scope/lookup de RolePermission:1 fila×1 loop,91→92 hits. Listados del tenant grande leen RolePermission2→40filas×20 roles,40→800 grants materializados y420 asignaciones; permissionsFor aumenta el fanout y cambia el plan (unidades21 filas×840loops pasa a21×1). Scopes filtra un código y devuelve el mismo conjunto pese al ancho: grants finales20, asignaciones420. Hits 2059→4366 en ambos listados; no spill temporal reportado en sus nodos. Cardinalidad RolePermission crece lineal20 x por construcción; el costo observado no es uniformemente20 x: permissionsFor grande ~5x p50 y can/scopes quedan dominados por búsqueda/filtros/contexto. No extrapolar complejidad asintótica ni latencia productiva desde esos dos escenarios. Se conserva el índice sin optimización especulativa.
+
+## Antecedentes 2.4 (sustituidos solo donde ADR-042 lo indica)
 
 ## 2.4 — evaluador efectivo y demostración protegida
 

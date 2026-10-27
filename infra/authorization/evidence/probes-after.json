@@ -1,0 +1,20 @@
+{
+  "phase": "after",
+  "results": [
+    {
+      "case": "Literal Principal provenance",
+      "layer": "trusted service",
+      "secure": true
+    },
+    {
+      "case": "Organizations SQL cross-tenant read with fixed GUC",
+      "layer": "PostgreSQL RLS",
+      "secure": true
+    },
+    {
+      "case": "Internal bug is not retryable database outage",
+      "layer": "HTTP error contract",
+      "secure": true
+    }
+  ]
+}

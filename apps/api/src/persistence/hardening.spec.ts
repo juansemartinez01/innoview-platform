@@ -1,3 +1,8 @@
+import {
+  organizationReadFixture,
+  organizationsFixture,
+  organizationsDiagnosticFixture,
+} from '../organizations/organizations-fixture.spec.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
@@ -43,7 +48,8 @@ export async function verifyHardening(
   env: Environment,
 ) {
   const operator = await initializeOrganizationsOperatorDataSource(env);
-  const service = new OrganizationsService(operator);
+  const service = await organizationsFixture(operator, env);
+  const diagnostic = await organizationsDiagnosticFixture(operator, env);
   try {
     const request = organizationOperation();
     const a = await service.createTenant(
@@ -70,12 +76,12 @@ export async function verifyHardening(
             return true;
           }),
         );
-        const [counts] = await operator.query<{ n: number }[]>(
+        const [counts] = await diagnostic.query<{ n: number }[]>(
           'SELECT count(*)::int AS n FROM organizations.audit_event WHERE operation_request_id=$1',
           [request.requestId],
         );
         assert.equal(counts.n, 3);
-        const [operations] = await operator.query<{ n: number }[]>(
+        const [operations] = await diagnostic.query<{ n: number }[]>(
           'SELECT count(*)::int AS n FROM organizations.operation WHERE request_id=$1',
           [request.requestId],
         );
@@ -170,7 +176,7 @@ export async function verifyHardening(
           ),
           branches[0],
         );
-        const history = await operator.query<
+        const history = await diagnostic.query<
           { request_id: string; n: number }[]
         >(
           'SELECT request_id,count(*)::int AS n FROM organizations.audit_event WHERE operation_request_id=ANY($1::uuid[]) GROUP BY request_id',
@@ -200,13 +206,13 @@ export async function verifyHardening(
           'INACTIVE',
           organizationOperation(),
         );
-        const [events] = await operator.query<{ n: number }[]>(
+        const [events] = await diagnostic.query<{ n: number }[]>(
           "SELECT count(*)::int AS n FROM organizations.audit_event WHERE tenant_id=$1 AND action='STATUS_CHANGED'",
           [a.tenant.id],
         );
         assert.equal(events.n, 1);
         const bad = organizationOperation();
-        const before: unknown = await operator.query<unknown>(
+        const before: unknown = await diagnostic.query<unknown>(
           'SELECT count(*)::int AS n FROM organizations.operation',
         );
         await assert.rejects(
@@ -220,13 +226,13 @@ export async function verifyHardening(
           OrganizationOperationError,
         );
         assert.deepEqual(
-          await operator.query(
+          await diagnostic.query(
             'SELECT count(*)::int AS n FROM organizations.operation',
           ),
           before,
         );
         assert.deepEqual(
-          await operator.query(
+          await diagnostic.query(
             'SELECT id FROM organizations.audit_event WHERE request_id=$1',
             [bad.requestId],
           ),
@@ -242,7 +248,7 @@ export async function verifyHardening(
           await service.setStatus(a.tenant.id, null, 'INACTIVE', statusRequest),
           original,
         );
-        const [current] = await operator.query<{ status: string }[]>(
+        const [current] = await diagnostic.query<{ status: string }[]>(
           'SELECT status FROM organizations.tenant WHERE id=$1',
           [a.tenant.id],
         );
@@ -251,11 +257,15 @@ export async function verifyHardening(
         await assert.rejects(
           operator.transaction(async (manager) => {
             await manager.query(
+              "SELECT set_config('innoview.tenant_id',$1,true)",
+              [a.tenant.id],
+            );
+            await manager.query(
               "SELECT set_config('innoview.organization_actor',$1,true),set_config('innoview.organization_request',$2,true),set_config('innoview.organization_reason',$3,true),set_config('innoview.organization_actor_type','SYSTEM',true)",
               [incomplete.actor, incomplete.requestId, incomplete.reason],
             );
             await manager.query(
-              "INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source) VALUES($1,$2,'CREATE_TENANT',$3,$4,'SYSTEM',$5,'fixture')",
+              "INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source) VALUES($1,$2,'SET_STATUS',$3,$4,'SYSTEM',$5,'fixture')",
               [
                 incomplete.requestId,
                 a.tenant.id,
@@ -268,7 +278,7 @@ export async function verifyHardening(
           (error) => state(error, '23514'),
         );
         assert.deepEqual(
-          await operator.query(
+          await diagnostic.query(
             'SELECT request_id FROM organizations.operation WHERE request_id=$1',
             [incomplete.requestId],
           ),
@@ -279,7 +289,7 @@ export async function verifyHardening(
     await t.test(
       'Audit: explicit technical provenance, real future Identity FK, no fabricated user actors or mutation of completed history',
       async () => {
-        const [event] = await operator.query<
+        const [event] = await diagnostic.query<
           {
             actor: string;
             actor_type: string;
@@ -304,7 +314,7 @@ export async function verifyHardening(
           'Operator group',
           human,
         );
-        const [provenance] = await operator.query<
+        const [provenance] = await diagnostic.query<
           { actor_type: string; actor: string }[]
         >(
           'SELECT actor_type,actor FROM organizations.audit_event WHERE request_id=$1 LIMIT 1',
@@ -336,9 +346,11 @@ export async function verifyHardening(
           );
         }
         await assert.rejects(
-          operator.query(
-            "UPDATE organizations.operation SET result='{}' WHERE request_id=$1",
-            [request.requestId],
+          organizationReadFixture(operator, a.tenant.id, (manager) =>
+            manager.query(
+              "UPDATE organizations.operation SET result='{}' WHERE request_id=$1",
+              [request.requestId],
+            ),
           ),
           (error) => state(error, '42501'),
         );
@@ -367,7 +379,7 @@ export async function verifyHardening(
         );
         assert.equal(
           (
-            await operator.transaction((manager) =>
+            await organizationReadFixture(operator, a.tenant.id, (manager) =>
               service.getStructure(a.tenant.id, manager),
             )
           ).tenant.id,
@@ -476,16 +488,16 @@ export async function verifyHardening(
       'Directory: read-only diagnostic detects isolated tampering and does not repair or bypass RLS',
       async () => {
         const check = () =>
-          operator.transaction('REPEATABLE READ', async (manager) => {
+          diagnostic.transaction('REPEATABLE READ', async (manager) => {
             await manager.query('SET TRANSACTION READ ONLY');
             return directoryDifferences(manager);
           });
         assert.deepEqual(await check(), []);
         await assert.rejects(
           app.transaction((manager) => directoryDifferences(manager)),
-          /Organizations operator required/,
+          /Directory maintenance operator required/,
         );
-        const [before] = await operator.query<{ tenant_name: string }[]>(
+        const [before] = await diagnostic.query<{ tenant_name: string }[]>(
           'SELECT tenant_name FROM organizations.tenant_directory WHERE tenant_id=$1',
           [a.tenant.id],
         );
@@ -533,6 +545,8 @@ export async function verifyHardening(
           'membership',
           'organizations',
           'authorization',
+          'organizations_provisioner',
+          'directory_maintenance',
           'migrator',
           'bootstrap',
         ] as const) {
@@ -553,6 +567,8 @@ export async function verifyHardening(
               'membership',
               'organizations',
               'authorization',
+              'organizations_provisioner',
+              'directory_maintenance',
             ].includes(purpose)
               ? {
                   statement: '20s',

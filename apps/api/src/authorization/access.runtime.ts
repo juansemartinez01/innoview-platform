@@ -133,13 +133,13 @@ export class AuthorizationEvaluator implements AuthorizationAccessV1 {
       !canonicalUuid(scope.unitId)
     )
       return { allowed: false, reason: 'NO_GRANT' };
-    const [row] = await c.manager.query<{ status: string; allowed: boolean }[]>(
+    const [row] = await c.manager.query<{ status: string; granted: boolean }[]>(
       this.queries.can,
       [...this.parameters(c), permission, scope.type, scope.unitId],
     );
     if (!row) return { allowed: false, reason: 'UNKNOWN_PERMISSION' };
-    this.deprecation(c, row.status === 'DEPRECATED');
-    return row.allowed
+    this.deprecation(c, row.status === 'DEPRECATED' && row.granted);
+    return row.status === 'ACTIVE' && row.granted
       ? { allowed: true }
       : { allowed: false, reason: 'NO_GRANT' };
   }

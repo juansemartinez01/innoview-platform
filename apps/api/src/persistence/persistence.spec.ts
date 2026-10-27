@@ -1,5 +1,12 @@
+import {
+  organizationsDiagnosticFixture,
+  organizationReadFixture,
+  organizationsFixture,
+} from '../organizations/organizations-fixture.spec.js';
 import { verifyAuthorization } from '../authorization/authorization.spec.js';
 import { verifyAccess } from '../authorization/access.spec.js';
+import { verifyOperationalBoundaries } from '../organizations/operational-boundaries.spec.js';
+import { verifyHttpErrors } from '../security/http-security.spec.js';
 import { verifyAuthorizationPreparation } from '../authorization/preparation.spec.js';
 import {
   versionOneFixture,
@@ -8,7 +15,6 @@ import {
 } from './operation-hardening.spec.js';
 import { verifyHardening } from './hardening.spec.js';
 import { readdirSync } from 'node:fs';
-import { OrganizationsService } from '../organizations/organizations.service.js';
 import { initializeOrganizationsOperatorDataSource } from './data-sources.js';
 import { verifyOrganizationsRls } from '../organizations/organizations-rls.spec.js';
 import assert from 'node:assert/strict';
@@ -79,6 +85,10 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     DB_ORGANIZATIONS_PASSWORD: randomBytes(24).toString('hex'),
     DB_AUTHORIZATION_USER: `test_authorization_${suffix}`,
     DB_AUTHORIZATION_PASSWORD: randomBytes(24).toString('hex'),
+    DB_ORGANIZATIONS_PROVISIONER_USER: `test_org_provisioner_${suffix}`,
+    DB_ORGANIZATIONS_PROVISIONER_PASSWORD: randomBytes(24).toString('hex'),
+    DB_DIRECTORY_MAINTENANCE_USER: `test_directory_${suffix}`,
+    DB_DIRECTORY_MAINTENANCE_PASSWORD: randomBytes(24).toString('hex'),
     DB_MIGRATOR_PASSWORD: randomBytes(24).toString('hex'),
   };
   const app = createDataSource('app', env);
@@ -175,6 +185,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
             .filter(
               (name) =>
                 name.endsWith('.js') &&
+                Number(name.slice(0, 13)) <= 1793124000000 &&
                 !name.includes('OrganizationsTenantRls') &&
                 !name.includes('OrganizationOperations') &&
                 !name.includes('OperationTriggerHardening') &&
@@ -194,7 +205,11 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
         await provisionDatabase(env);
         const operator = await initializeOrganizationsOperatorDataSource(env);
         try {
-          const service = new OrganizationsService(operator);
+          const service = await organizationsFixture(operator, env);
+          const diagnostic = await organizationsDiagnosticFixture(
+            operator,
+            env,
+          );
           // Historical fixture before 2.2/2.3a: explicit SQL against the then-current schema.
           const tid = randomUUID(),
             gid = randomUUID(),
@@ -234,6 +249,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               .filter(
                 (name) =>
                   name.endsWith('.js') &&
+                  Number(name.slice(0, 13)) <= 1793124000000 &&
                   !name.includes('OrganizationOperations') &&
                   !name.includes('OperationTriggerHardening') &&
                   !name.includes('AuthorizationModel') &&
@@ -266,6 +282,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               .filter(
                 (name) =>
                   name.endsWith('.js') &&
+                  Number(name.slice(0, 13)) <= 1793124000000 &&
                   !name.includes('OperationTriggerHardening') &&
                   !name.includes('AuthorizationModel') &&
                   !name.includes('IndexableIdentityTenantRls'),
@@ -281,18 +298,23 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
             await nine.destroy();
           }
           const v1 = await versionOneFixture(operator);
-          assert.equal((await migrator.runMigrations()).length, 3);
-          await verifyVersionOneUpgrade(operator, v1);
+          assert.equal(
+            (await migrator.runMigrations()).length,
+            migrator.migrations.length - 9,
+          );
+          await verifyVersionOneUpgrade(operator, v1, env);
 
           assert.equal(
             (
-              await operator.transaction((manager) =>
-                service.getStructure(existing.tenant.id, manager),
+              await organizationReadFixture(
+                operator,
+                existing.tenant.id,
+                (manager) => service.getStructure(existing.tenant.id, manager),
               )
             ).branches.length,
             1,
           );
-          const [directory] = await operator.query<
+          const [directory] = await diagnostic.query<
             { tenant_name: string; available: boolean }[]
           >(
             'SELECT tenant_name,available FROM organizations.tenant_directory WHERE tenant_id=$1',
@@ -303,7 +325,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
             available: false,
           });
           assert.deepEqual(
-            await operator.query(
+            await diagnostic.query(
               'SELECT actor,actor_type,reason,actor_identity_id,operation_request_id FROM organizations.audit_event WHERE tenant_id=$1',
               [existing.tenant.id],
             ),
@@ -326,7 +348,7 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
               'SELECT count(*)::int AS n FROM platform_meta.migrations',
             )
           )[0].n,
-          12,
+          migrator.migrations.length,
         );
         assert.equal(await migrator.showMigrations(), false);
         const [owner] = await migrator.query<{ owner: string }[]>(
@@ -628,11 +650,15 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
     await verifyAuthorization(t, app, migrator, env);
     await verifyAuthorizationPreparation(t, app, migrator, env);
     await verifyAccess(t, app, migrator, env);
+    await verifyOperationalBoundaries(t, migrator, env);
+    await verifyHttpErrors(t);
 
     await t.test(
       'real migration reverts and reapplies only in this disposable database',
       async () => {
         assert.match(database, /^innoview_test_[a-f0-9]{32}$/);
+        await migrator.undoLastMigration(); // directory repair, disposable only
+        await migrator.undoLastMigration(); // operational boundaries, disposable only
         await migrator.undoLastMigration();
         const revertAuthorization = spawnSync(
           process.execPath,
@@ -850,6 +876,8 @@ await test('PostgreSQL real: provisioning, restricted roles and versioned migrat
           env.DB_MEMBERSHIP_USER!,
           env.DB_ORGANIZATIONS_USER!,
           env.DB_AUTHORIZATION_USER!,
+          env.DB_ORGANIZATIONS_PROVISIONER_USER!,
+          env.DB_DIRECTORY_MAINTENANCE_USER!,
         ])
           await bootstrap.query(
             `DROP ROLE IF EXISTS ${pg.escapeIdentifier(role)}`,

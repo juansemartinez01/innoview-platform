@@ -11,7 +11,7 @@ import {
 } from './access.runtime.js';
 import { AUTHORIZATION_ACCESS_V1 } from './access.contract.js';
 import {
-  BusinessAuthorizationGuard,
+  CompanyDemonstrationGuard,
   AuthorizationDemonstrationController,
 } from './demonstration.js';
 @Module({
@@ -27,7 +27,7 @@ import {
     AuthorizationReads,
     AuthorizationEvaluator,
     { provide: AUTHORIZATION_ACCESS_V1, useExisting: AuthorizationEvaluator },
-    BusinessAuthorizationGuard,
+    CompanyDemonstrationGuard,
   ],
   exports: [AuthorizationService, AuthorizationReads, AUTHORIZATION_ACCESS_V1],
   controllers: [AuthorizationDemonstrationController],

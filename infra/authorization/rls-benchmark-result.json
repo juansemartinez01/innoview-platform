@@ -14,12 +14,12 @@
         ],
         "directory": [
           {
-            "tenant_id": "4c3ae403-ff78-47f3-91dc-56ab0ad3c930"
+            "tenant_id": "50013ed8-ad2e-433f-bac5-00a3077b3c2f"
           }
         ],
         "companies": [
           {
-            "id": "6961a7b8-9a73-49a7-a0c2-8945d5c2dd7f"
+            "id": "36c332ff-388e-431e-b19e-3bb11f0f0436"
           }
         ]
       },
@@ -32,12 +32,12 @@
         ],
         "directory": [
           {
-            "tenant_id": "4c3ae403-ff78-47f3-91dc-56ab0ad3c930"
+            "tenant_id": "50013ed8-ad2e-433f-bac5-00a3077b3c2f"
           }
         ],
         "companies": [
           {
-            "id": "6961a7b8-9a73-49a7-a0c2-8945d5c2dd7f"
+            "id": "36c332ff-388e-431e-b19e-3bb11f0f0436"
           }
         ]
       },
@@ -79,8 +79,8 @@
       }
     ],
     "plan": {
-      "executionMs": 3.499,
-      "planningMs": 0.078,
+      "executionMs": 3.321,
+      "planningMs": 0.06,
       "actualRows": 1,
       "sharedHits": 267,
       "sharedReads": 0,
@@ -92,7 +92,7 @@
           "actualRows": 1,
           "sharedHits": 267,
           "sharedReads": 0,
-          "actualTotalMs": 3.485
+          "actualTotalMs": 3.312
         }
       ],
       "nodes": [
@@ -107,8 +107,11 @@
           "sharedReads": 0,
           "filter": "(((status)::text = 'ACTIVE'::text) AND ((user_identity_id)::text = NULLIF(current_setting('innoview.user_identity_id'::text, true), ''::text)))",
           "rowsRemovedByFilter": 19999,
-          "actualTotalMs": 3.485,
-          "totalCost": 767
+          "actualTotalMs": 3.312,
+          "totalCost": 767,
+          "intermediateRows": 1,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
         }
       ],
       "raw": {
@@ -122,8 +125,8 @@
           "Total Cost": 767,
           "Plan Rows": 100,
           "Plan Width": 16,
-          "Actual Startup Time": 0.008,
-          "Actual Total Time": 3.485,
+          "Actual Startup Time": 0.006,
+          "Actual Total Time": 3.312,
           "Actual Rows": 1,
           "Actual Loops": 1,
           "Disabled": false,
@@ -152,9 +155,9 @@
           "Temp Read Blocks": 0,
           "Temp Written Blocks": 0
         },
-        "Planning Time": 0.078,
+        "Planning Time": 0.06,
         "Triggers": [],
-        "Execution Time": 3.499
+        "Execution Time": 3.321
       }
     }
   },
@@ -169,12 +172,12 @@
         ],
         "directory": [
           {
-            "tenant_id": "4c3ae403-ff78-47f3-91dc-56ab0ad3c930"
+            "tenant_id": "50013ed8-ad2e-433f-bac5-00a3077b3c2f"
           }
         ],
         "companies": [
           {
-            "id": "6961a7b8-9a73-49a7-a0c2-8945d5c2dd7f"
+            "id": "36c332ff-388e-431e-b19e-3bb11f0f0436"
           }
         ]
       },
@@ -187,12 +190,12 @@
         ],
         "directory": [
           {
-            "tenant_id": "4c3ae403-ff78-47f3-91dc-56ab0ad3c930"
+            "tenant_id": "50013ed8-ad2e-433f-bac5-00a3077b3c2f"
           }
         ],
         "companies": [
           {
-            "id": "6961a7b8-9a73-49a7-a0c2-8945d5c2dd7f"
+            "id": "36c332ff-388e-431e-b19e-3bb11f0f0436"
           }
         ]
       },
@@ -234,8 +237,8 @@
       }
     ],
     "plan": {
-      "executionMs": 0.038,
-      "planningMs": 0.053,
+      "executionMs": 0.027,
+      "planningMs": 0.064,
       "actualRows": 1,
       "sharedHits": 3,
       "sharedReads": 0,
@@ -247,7 +250,7 @@
           "actualRows": 1,
           "sharedHits": 3,
           "sharedReads": 0,
-          "actualTotalMs": 0.017
+          "actualTotalMs": 0.018
         }
       ],
       "nodes": [
@@ -263,8 +266,11 @@
           "sharedReads": 0,
           "indexCond": "((user_identity_id = CASE WHEN (current_setting('innoview.user_identity_id'::text, true) ~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'::text) THEN (current_setting('innoview.user_identity_id'::text, true))::uuid ELSE NULL::uuid END) AND ((status)::text = 'ACTIVE'::text))",
           "rowsRemovedByIndexRecheck": 0,
-          "actualTotalMs": 0.017,
-          "totalCost": 8.32
+          "actualTotalMs": 0.018,
+          "totalCost": 8.32,
+          "intermediateRows": 1,
+          "tempReadBlocks": 0,
+          "tempWrittenBlocks": 0
         }
       ],
       "raw": {
@@ -280,8 +286,8 @@
           "Total Cost": 8.32,
           "Plan Rows": 1,
           "Plan Width": 16,
-          "Actual Startup Time": 0.017,
-          "Actual Total Time": 0.017,
+          "Actual Startup Time": 0.018,
+          "Actual Total Time": 0.018,
           "Actual Rows": 1,
           "Actual Loops": 1,
           "Disabled": false,
@@ -311,9 +317,9 @@
           "Temp Read Blocks": 0,
           "Temp Written Blocks": 0
         },
-        "Planning Time": 0.053,
+        "Planning Time": 0.064,
         "Triggers": [],
-        "Execution Time": 0.038
+        "Execution Time": 0.027
       }
     }
   },

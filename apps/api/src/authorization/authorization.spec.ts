@@ -1,3 +1,5 @@
+import { organizationsFixture } from '../organizations/organizations-fixture.spec.js';
+import { verifiedPrincipal } from '../authentication/verified-fixture.spec.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import type { TestContext } from 'node:test';
@@ -32,11 +34,13 @@ import {
   initializeAuthorizationOperatorDataSource,
   initializeMembershipOperatorDataSource,
   initializeOrganizationsOperatorDataSource,
+  initializeDirectoryMaintenanceDataSource,
   createDataSource,
 } from '../persistence/data-sources.js';
 import type { Environment } from '../persistence/connection.config.js';
 import { securityInvariants } from '../persistence/security-diagnostics.js';
 import { provisionDatabase } from '../persistence/provision.js';
+import { authorizationFingerprint } from './fingerprint.js';
 
 const code = (error: unknown, ...codes: string[]) =>
   typeof error === 'object' &&
@@ -53,7 +57,8 @@ export async function verifyAuthorization(
   const operator = await initializeAuthorizationOperatorDataSource(env);
   const memberOperator = await initializeMembershipOperatorDataSource(env);
   const orgOperator = await initializeOrganizationsOperatorDataSource(env);
-  const orgs = new OrganizationsService(orgOperator),
+  const orgDiagnostic = await initializeDirectoryMaintenanceDataSource(env);
+  const orgs = await organizationsFixture(orgOperator, env),
     members = new MembershipsService(memberOperator),
     identities = new IdentityService(app);
   const service = new AuthorizationService(operator, {
@@ -85,13 +90,9 @@ export async function verifyAuthorization(
     'Authorization branch',
     organizationOperation(),
   );
-  const principalA = {
-      issuer: 'https://authorization-fixture.invalid',
-      subject: randomUUID(),
-      clientId: 'innoview-portal',
-    },
-    principalB = { ...principalA, subject: randomUUID() },
-    empty = { ...principalA, subject: randomUUID() };
+  const principalA = await verifiedPrincipal(),
+    principalB = await verifiedPrincipal(),
+    empty = await verifiedPrincipal();
   const idA = await identities.resolve(principalA),
     idB = await identities.resolve(principalB);
   await identities.resolve(empty);
@@ -1106,7 +1107,7 @@ export async function verifyAuthorization(
             op,
           );
           assert.deepEqual(await first, await second);
-          const [version] = await orgOperator.query<
+          const [version] = await orgDiagnostic.query<
             { fingerprint_version: number }[]
           >(
             'SELECT fingerprint_version FROM organizations.operation WHERE request_id=$1',
@@ -1128,9 +1129,118 @@ export async function verifyAuthorization(
         assert.equal(constraint.convalidated, true);
       },
     );
+    await t.test(
+      'D5: real persisted historical Authorization v2 replays concurrently without rewriting history, audit or revision',
+      async () => {
+        const op = organizationOperation();
+        const name = 'Historical authorization v2',
+          description = 'Historical v2';
+        // Frozen bytes emitted by the approved v2 algorithm, independently of
+        // the current fingerprint dispatcher. This is not fictitious Auth v1.
+        const bytes = JSON.stringify([
+          'object',
+          [
+            [
+              'args',
+              [
+                'object',
+                [
+                  ['description', ['string', description]],
+                  ['name', ['string', name]],
+                  ['tenantId', ['string', a.tenant.id]],
+                ],
+              ],
+            ],
+            ['module', ['string', 'authorization']],
+            ['operation', ['string', 'CREATE_ROLE']],
+            ['version', ['number', '2']],
+          ],
+        ]);
+        const hash = createHash('sha256').update(bytes).digest('hex');
+        const original = await operator.transaction(async (manager) => {
+          await establishOperationContext(
+            manager,
+            'authorization',
+            op,
+            a.tenant.id,
+          );
+          await manager.query(
+            "INSERT INTO \"authorization\".operation(request_id,tenant_id,operation_type,fingerprint,fingerprint_version,actor,actor_type,reason,technical_source) VALUES($1,$2,'CREATE_ROLE',$3,2,$4,$5,$6,'fixture:historical-v2')",
+            [
+              op.requestId,
+              a.tenant.id,
+              hash,
+              op.actor,
+              op.actorType,
+              op.reason,
+            ],
+          );
+          await manager.query(
+            'INSERT INTO "authorization".tenant_revision(tenant_id) VALUES($1) ON CONFLICT DO NOTHING',
+            [a.tenant.id],
+          );
+          const [role] = await manager.query<
+            { id: string; name: string; status: string }[]
+          >(
+            'INSERT INTO "authorization".role(tenant_id,name,description) VALUES($1,$2,$3) RETURNING id,name,status',
+            [a.tenant.id, name, description],
+          );
+          await manager.query(
+            'UPDATE "authorization".operation SET result=$2,completed_at=clock_timestamp() WHERE request_id=$1',
+            [op.requestId, JSON.stringify(role)],
+          );
+          return role;
+        });
+        const snapshot = () =>
+          read(a.tenant.id, (manager) =>
+            manager.query<unknown[]>(
+              'SELECT to_jsonb(o) AS operation,(SELECT jsonb_agg(e ORDER BY id) FROM "authorization".audit_event e WHERE e.operation_request_id=o.request_id) AS audit,(SELECT revision FROM "authorization".tenant_revision WHERE tenant_id=o.tenant_id) AS revision FROM "authorization".operation o WHERE request_id=$1',
+              [op.requestId],
+            ),
+          );
+        const before = await snapshot();
+        const replays = await Promise.all(
+          Array.from({ length: 8 }, () =>
+            service.createRole(a.tenant.id, name, description, op),
+          ),
+        );
+        for (const replay of replays) assert.deepEqual(replay, original);
+        for (const changed of [
+          { ...op, actor: 'other' },
+          { ...op, reason: 'other' },
+          { ...op, actorType: 'INNOVIEW_OPERATOR' as const },
+        ])
+          await assert.rejects(
+            service.createRole(a.tenant.id, name, description, changed),
+            (error) => code(error, 'REQUEST_ID_CONFLICT'),
+          );
+        await assert.rejects(
+          service.createRole(a.tenant.id, name, 'Changed', op),
+          (error) => code(error, 'REQUEST_ID_CONFLICT'),
+        );
+        assert.deepEqual(await snapshot(), before);
+        assert.equal(CURRENT_FINGERPRINT_VERSION, 2);
+        const x = { nested: { z: [null, undefined, { b: 2, a: 1 }], a: true } },
+          y = { nested: { a: true, z: [null, undefined, { a: 1, b: 2 }] } };
+        assert.equal(
+          authorizationFingerprint(2, 'FIXTURE', x),
+          authorizationFingerprint(2, 'FIXTURE', y),
+        );
+        assert.notEqual(
+          authorizationFingerprint(2, 'FIXTURE', {}),
+          authorizationFingerprint(2, 'FIXTURE', { value: null }),
+        );
+        assert.notEqual(
+          authorizationFingerprint(2, 'FIXTURE', { value: undefined }),
+          authorizationFingerprint(2, 'FIXTURE', { value: null }),
+        );
+        assert.throws(() => authorizationFingerprint(1, 'FIXTURE', {}));
+      },
+    );
   } finally {
     await operator.destroy();
     await memberOperator.destroy();
+    await orgDiagnostic.destroy();
     await orgOperator.destroy();
   }
 }

@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 
 export type SecurityEvent =
+  | 'INTERNAL_ERROR'
   | 'AUTHENTICATION_REJECTED'
   | 'AUTHORIZATION_REJECTED'
   | 'SECURITY_CONTEXT_MISSING'

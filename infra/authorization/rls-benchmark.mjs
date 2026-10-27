@@ -3,7 +3,7 @@ import { writeFile } from 'node:fs/promises';
 import { disposableAuthorization } from './disposable.mjs';
 import { seededUuid } from './dataset.mjs';
 import { summarizePlan } from './candidates.mjs';
-import { OrganizationsService } from '../../apps/api/dist/organizations/organizations.service.js';
+
 import { securityInvariants } from '../../apps/api/dist/persistence/security-diagnostics.js';
 const operation = () => ({
   actor: 'fixture:rls-upgrade',
@@ -21,19 +21,49 @@ console.info(
 try {
   const report = await disposableAuthorization(
     async ({ sources }) => {
-      const orgs = new OrganizationsService(sources.organizations);
-      const t = await orgs.createTenant(
-        'Indexability fixture',
-        'Indexability group',
-        operation(),
-      );
-      await orgs.createCompany(
-        t.tenant.id,
-        t.group.id,
-        'Indexability company',
-        null,
-        operation(),
-      );
+      // Frozen schema-11 write fixture: the historical ordinary operator was
+      // allowed to provision. Do not teach current services to bypass new roles.
+      const op = operation(),
+        tid = crypto.randomUUID(),
+        gid = crypto.randomUUID(),
+        cid = crypto.randomUUID();
+      await sources.organizations.transaction(async (m) => {
+        for (const [key, value] of Object.entries({
+          request: op.requestId,
+          actor: op.actor,
+          reason: op.reason,
+          actor_type: op.actorType,
+        }))
+          await m.query('SELECT set_config($1,$2,true)', [
+            'innoview.organization_' + key,
+            value,
+          ]);
+        await m.query(
+          "INSERT INTO organizations.operation(request_id,operation_type,fingerprint,fingerprint_version,actor,actor_type,reason,technical_source) VALUES($1,'CREATE_TENANT',$2,2,$3,$4,$5,'fixture:schema11')",
+          [op.requestId, '0'.repeat(64), op.actor, op.actorType, op.reason],
+        );
+        await m.query(
+          "INSERT INTO organizations.tenant(id,name) VALUES($1,'Indexability fixture')",
+          [tid],
+        );
+        await m.query(
+          "INSERT INTO organizations.organizational_unit(id,tenant_id,type,name) VALUES($1,$2,'GROUP','Indexability group'),($3,$2,'COMPANY','Indexability company')",
+          [gid, tid, cid],
+        );
+        await m.query(
+          'INSERT INTO organizations.business_group(tenant_id,id) VALUES($1,$2)',
+          [tid, gid],
+        );
+        await m.query(
+          'INSERT INTO organizations.company(tenant_id,id,business_group_id) VALUES($1,$2,$3)',
+          [tid, cid, gid],
+        );
+        await m.query(
+          "UPDATE organizations.operation SET tenant_id=$2,result='{}',completed_at=clock_timestamp() WHERE request_id=$1",
+          [op.requestId, tid],
+        );
+      });
+      const t = { tenant: { id: tid } };
       for (let offset = 0; offset < 20000; offset += 500) {
         const ids = Array.from({ length: 500 }, (_, i) =>
           seededUuid('rls-identity:' + (offset + i)),
@@ -103,6 +133,11 @@ try {
         return { results, plan };
       };
       const before = await capture();
+      const allMigrations = sources.migrator.migrations;
+      sources.migrator.migrations = allMigrations.filter(
+        (m) =>
+          Number((m.name ?? m.constructor.name).slice(-13)) <= 1793124000000,
+      );
       assert.equal((await sources.migrator.runMigrations()).length, 1);
       const after = await capture();
       assert.deepEqual(after.results, before.results);
@@ -117,13 +152,16 @@ try {
             !/(?:user_identity_id|tenant_id|\bid)\)?\s*::text/.test(p.qual),
         ),
       );
-      assert.deepEqual(
-        (await securityInvariants(sources.organizations)).findings,
-        [],
-      );
       await sources.migrator.undoLastMigration();
       assert.deepEqual((await capture()).results, before.results);
       await sources.migrator.runMigrations();
+      sources.migrator.migrations = allMigrations;
+      await sources.migrator.runMigrations();
+      assert.deepEqual(
+        (await securityInvariants(sources.maintenance)).findings,
+        [],
+      );
+      assert.deepEqual((await capture()).results, after.results);
       return {
         postgres: (await sources.migrator.query('SELECT version()'))[0].version,
         seed: 'innoview-authorization-20261026-v1',

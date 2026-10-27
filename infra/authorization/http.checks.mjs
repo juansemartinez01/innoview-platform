@@ -4,6 +4,7 @@ import {
   initializeAuthorizationOperatorDataSource,
   initializeMembershipOperatorDataSource,
   initializeOrganizationsOperatorDataSource,
+  initializeOrganizationsProvisionerDataSource,
 } from '../../apps/api/dist/persistence/data-sources.js';
 import { OrganizationsService } from '../../apps/api/dist/organizations/organizations.service.js';
 import { MembershipsService } from '../../apps/api/dist/memberships/memberships.service.js';
@@ -17,9 +18,10 @@ export async function verifyAccessHttp(
     initializeAuthorizationOperatorDataSource(env),
     initializeMembershipOperatorDataSource(env),
     initializeOrganizationsOperatorDataSource(env),
+    initializeOrganizationsProvisionerDataSource(env),
   ]);
-  const [auth, member, org] = sources,
-    orgs = new OrganizationsService(org),
+  const [auth, member, org, provisioner] = sources,
+    orgs = new OrganizationsService(org, provisioner),
     members = new MembershipsService(member);
   const writer = new AuthorizationService(auth, {
     membershipActive: (tenant, id) =>
@@ -227,6 +229,13 @@ export async function verifyAccessHttp(
           "UPDATE \"authorization\".permission SET status='DEPRECATED' WHERE code='foundation.probe.read'",
         );
         await denied(await request(), 403);
+        assert.match(env.DB_NAME, /^innoview_test_/);
+        await assert.rejects(
+          migrator.query(
+            "UPDATE \"authorization\".permission SET status='ACTIVE' WHERE code='foundation.probe.read'",
+          ),
+          (error) => error.code === '23514',
+        );
         await members.revoke(tenant.tenant.id, users[0].identity, op());
         await denied(await request(), 404);
       },

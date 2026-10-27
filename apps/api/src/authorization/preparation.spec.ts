@@ -1,3 +1,4 @@
+import { organizationsFixture } from '../organizations/organizations-fixture.spec.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { setTimeout as pause } from 'node:timers/promises';
@@ -40,7 +41,7 @@ export async function verifyAuthorizationPreparation(
     member = await initializeMembershipOperatorDataSource(env),
     org = await initializeOrganizationsOperatorDataSource(env);
   const memberships = new MembershipsService(member),
-    organizations = new OrganizationsService(org);
+    organizations = await organizationsFixture(org, env);
   const references = {
     membershipActive: (tenant: string, id: string) =>
       memberships.activeMembershipReference(tenant, id),

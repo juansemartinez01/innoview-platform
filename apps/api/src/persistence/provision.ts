@@ -13,7 +13,11 @@ export async function provisionDatabase(
   const membership = connectionConfig('membership', env);
   const organizations = connectionConfig('organizations', env);
   const authorization = connectionConfig('authorization', env);
+  const provisioner = connectionConfig('organizations_provisioner', env);
+  const maintenance = connectionConfig('directory_maintenance', env);
   const configs = [
+    provisioner,
+    maintenance,
     bootstrap,
     app,
     migrator,
@@ -24,6 +28,8 @@ export async function provisionDatabase(
     authorization,
   ];
   const runtime = [
+    provisioner,
+    maintenance,
     app,
     portal,
     control,
@@ -35,8 +41,8 @@ export async function provisionDatabase(
     .map((c) => pg.escapeIdentifier(c.user))
     .join(', ');
   if (
-    new Set(configs.map((c) => c.user)).size !== 8 ||
-    new Set(configs.map((c) => c.password)).size !== 8
+    new Set(configs.map((c) => c.user)).size !== configs.length ||
+    new Set(configs.map((c) => c.password)).size !== configs.length
   ) {
     throw new Error(
       'Bootstrap, migrator and app must use independent credentials',
@@ -63,6 +69,8 @@ export async function provisionDatabase(
       [membership, 'membership'],
       [organizations, 'organizations'],
       [authorization, 'authorization'],
+      [provisioner, 'organizations_provisioner'],
+      [maintenance, 'directory_maintenance'],
     ] as const) {
       const marker = `innoview:${bootstrap.database}:${kind}`;
       const existing = await client.query<{ marker: string | null }>(
@@ -94,6 +102,8 @@ export async function provisionDatabase(
     // Defaults apply only to new connections; migrate separately from runtime.
     for (const role of runtime) {
       const operational = [
+        provisioner.user,
+        maintenance.user,
         membership.user,
         organizations.user,
         authorization.user,
@@ -239,6 +249,9 @@ export async function provisionDatabase(
     await client.query(
       `GRANT USAGE ON SCHEMA organizations TO ${q(app.user)}, ${q(organizations.user)}`,
     );
+    const scopedOrganizations = await client.query(
+      "SELECT 1 FROM pg_policies WHERE schemaname='organizations' AND tablename='tenant' AND policyname='operator_boundary'",
+    );
     // Exact existing objects only. No broad default grants to future tables/columns.
     for (const table of [
       'tenant',
@@ -256,7 +269,7 @@ export async function provisionDatabase(
       );
       if (!found.rows[0]?.exists) continue;
       await client.query(
-        `GRANT SELECT, INSERT ON organizations.${q(table)} TO ${q(organizations.user)}`,
+        `GRANT ${table === 'tenant' && scopedOrganizations.rowCount ? 'SELECT' : 'SELECT, INSERT'} ON organizations.${q(table)} TO ${q(organizations.user)}`,
       );
       if (table === 'operation')
         await client.query(
@@ -345,6 +358,72 @@ export async function provisionDatabase(
         await client.query(
           `GRANT UPDATE(${updates[table]}) ON "authorization".${q(table)} TO ${q(authorization.user)}`,
         );
+    }
+    for (const role of [provisioner, maintenance])
+      await client.query(
+        `GRANT USAGE ON SCHEMA organizations TO ${q(role.user)}`,
+      );
+    for (const table of [
+      'tenant',
+      'organizational_unit',
+      'business_group',
+      'tenant_directory',
+      'audit_event',
+      'operation',
+    ]) {
+      const found = await client.query<{ object: string | null }>(
+        'SELECT to_regclass($1) AS object',
+        [`organizations.${table}`],
+      );
+      if (!found.rows[0].object) continue;
+      await client.query(
+        `GRANT SELECT,INSERT ON organizations.${q(table)} TO ${q(provisioner.user)}`,
+      );
+      if (table === 'tenant')
+        await client.query(
+          `GRANT UPDATE(id) ON organizations.tenant TO ${q(provisioner.user)}`,
+        );
+      if (table === 'operation')
+        await client.query(
+          `GRANT UPDATE(tenant_id,result,completed_at) ON organizations.operation TO ${q(provisioner.user)}`,
+        );
+      if (table === 'tenant_directory')
+        await client.query(
+          `GRANT UPDATE ON organizations.tenant_directory TO ${q(provisioner.user)}`,
+        );
+    }
+    for (const table of [
+      'tenant',
+      'organizational_unit',
+      'business_group',
+      'company',
+      'branch',
+      'tenant_directory',
+      'audit_event',
+      'operation',
+    ]) {
+      const found = await client.query<{ object: string | null }>(
+        'SELECT to_regclass($1) AS object',
+        [`organizations.${table}`],
+      );
+      if (found.rows[0].object && !['company', 'branch'].includes(table))
+        await client.query(
+          `GRANT SELECT ON organizations.${q(table)} TO ${q(maintenance.user)}`,
+        );
+    }
+    const repair = await client.query<{ object: string | null }>(
+      "SELECT to_regclass('organizations.directory_repair_operation') AS object",
+    );
+    if (repair.rows[0].object) {
+      await client.query(
+        `GRANT INSERT,UPDATE,DELETE ON organizations.tenant_directory TO ${q(maintenance.user)}`,
+      );
+      await client.query(
+        `GRANT SELECT,INSERT ON organizations.directory_repair_operation,organizations.directory_repair_event TO ${q(maintenance.user)}`,
+      );
+      await client.query(
+        `GRANT UPDATE(result,completed_at) ON organizations.directory_repair_operation TO ${q(maintenance.user)}`,
+      );
     }
     await client.query('COMMIT');
   } catch {

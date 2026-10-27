@@ -1,3 +1,4 @@
+import { technicalEnvironment } from '../operations/environment.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
@@ -21,6 +22,10 @@ const rejected = [
   'DB_ORGANIZATIONS_PASSWORD',
   'DB_AUTHORIZATION_USER',
   'DB_AUTHORIZATION_PASSWORD',
+  'DB_ORGANIZATIONS_PROVISIONER_USER',
+  'DB_ORGANIZATIONS_PROVISIONER_PASSWORD',
+  'DB_DIRECTORY_MAINTENANCE_USER',
+  'DB_DIRECTORY_MAINTENANCE_PASSWORD',
   'AUTHORIZATION_OPERATOR_SECRET',
   'KEYCLOAK_ADMIN_PASSWORD',
   'KC_BOOTSTRAP_ADMIN_PASSWORD',
@@ -144,4 +149,47 @@ test('API grandchildren inherit the sanitized environment without Node preload o
       [...policy.system, ...policy.configuration].includes(key.toUpperCase()),
     ),
   );
+});
+
+test('Technical launchers admit only their own credential, never API/BFF/other operators/testing/Node injection', () => {
+  const input = Object.fromEntries(
+    [
+      ...rejected,
+      'DB_APP_USER',
+      'DB_APP_PASSWORD',
+      'DB_ORGANIZATIONS_PROVISIONER_USER',
+      'DB_ORGANIZATIONS_PROVISIONER_PASSWORD',
+      'DB_DIRECTORY_MAINTENANCE_USER',
+      'DB_DIRECTORY_MAINTENANCE_PASSWORD',
+    ].map((key) => [key, 'excluded-fixture']),
+  );
+  for (const [purpose, credential] of [
+    ['backup', ['DB_BOOTSTRAP_USER', 'PLATFORM_POSTGRES_PASSWORD']],
+    [
+      'diagnose',
+      ['DB_DIRECTORY_MAINTENANCE_USER', 'DB_DIRECTORY_MAINTENANCE_PASSWORD'],
+    ],
+    [
+      'directory',
+      ['DB_DIRECTORY_MAINTENANCE_USER', 'DB_DIRECTORY_MAINTENANCE_PASSWORD'],
+    ],
+    [
+      'provision-tenant',
+      [
+        'DB_ORGANIZATIONS_PROVISIONER_USER',
+        'DB_ORGANIZATIONS_PROVISIONER_PASSWORD',
+      ],
+    ],
+  ]) {
+    const result = technicalEnvironment(
+      purpose,
+      { ...input, PATH: 'file-injection', DB_HOST: '127.0.0.1' },
+      { PATH: 'system-path' },
+    );
+    assert.deepEqual(
+      Object.keys(result).sort(),
+      ['PATH', 'DB_HOST', ...credential].sort(),
+    );
+    assert.equal(result.PATH, 'system-path');
+  }
 });

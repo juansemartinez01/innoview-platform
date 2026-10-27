@@ -89,6 +89,13 @@ export function summarizePlan(plan) {
     heapFetches: n['Heap Fetches'],
     actualTotalMs: n['Actual Total Time'],
     totalCost: n['Total Cost'],
+    intermediateRows: n['Actual Rows'] * n['Actual Loops'],
+    peakMemoryKb: n['Peak Memory Usage'],
+    sortSpaceKb: n['Sort Space Used'],
+    sortSpaceType: n['Sort Space Type'],
+    hashBatches: n['Hash Batches'],
+    tempReadBlocks: n['Temp Read Blocks'],
+    tempWrittenBlocks: n['Temp Written Blocks'],
   }));
   return {
     executionMs: plan['Execution Time'],

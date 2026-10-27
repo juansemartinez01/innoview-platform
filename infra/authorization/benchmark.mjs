@@ -71,7 +71,7 @@ async function fixtureOperation(source, module, tenant, type, label, write) {
       );
     } else
       await manager.query(
-        'INSERT INTO organizations.operation(request_id,operation_type,fingerprint,fingerprint_version,actor,actor_type,reason,technical_source) VALUES($1,$2,$3,$4,$5,$6,$7,$8)',
+        'INSERT INTO organizations.operation(request_id,operation_type,fingerprint,fingerprint_version,actor,actor_type,reason,technical_source,tenant_id) VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)',
         [
           op.requestId,
           type,
@@ -81,6 +81,7 @@ async function fixtureOperation(source, module, tenant, type, label, write) {
           op.actorType,
           op.reason,
           sourceName,
+          type === 'CREATE_TENANT' ? null : tenant,
         ],
       );
     const result = await write(manager);
@@ -93,6 +94,19 @@ async function fixtureOperation(source, module, tenant, type, label, write) {
     return result;
   });
 }
+const width = Number(
+  process.argv
+    .find((arg) => arg.startsWith('--permissions-per-role='))
+    ?.split('=')[1] ?? 2,
+);
+assert.ok([2, 40].includes(width));
+const permissionIds = Array.from({ length: width }, (_, i) =>
+  i < 2
+    ? `a0000000-0000-4000-8000-00000000000${i + 1}`
+    : seededUuid('permission-width:' + i),
+);
+const artifact =
+  width === 2 ? 'benchmark-result.json' : 'benchmark-wide-result.json';
 const expectations = {
   grants:
     'Tenant/member index access; inline queries may repeat nested membership/directory checks. Materialized grants should bound role/RP checks to tenant roles, not assignments. DISTINCT permissions/scopes remove fanout. No full cross-tenant assignment scan.',
@@ -104,8 +118,7 @@ const expectations = {
 };
 console.info(
   JSON.stringify({
-    benchmark:
-      'authorization persistence reference queries, not the 2.4 evaluator',
+    benchmark: '2.5 definitive evaluator: role-permission width comparison',
     seed: BENCHMARK_SEED,
     tenants: 500,
     roleAssignments: 50000,
@@ -131,10 +144,18 @@ try {
   const report = await disposableAuthorization(async ({ sources }) => {
     const start = performance.now(),
       members = new MembershipsService(sources.membership);
+    if (width === 40)
+      await sources.migrator.transaction(async (manager) => {
+        for (let i = 2; i < width; i++)
+          await manager.query(
+            "INSERT INTO \"authorization\".permission(id,code,owner_module,description) VALUES($1,$2,'foundation','Discardable width benchmark only')",
+            [permissionIds[i], `foundation.benchmark_${i}.read`],
+          );
+      });
     const tenants = Array.from({ length: 500 }, (_, i) => benchmarkTenant(i));
     for (const tenant of tenants) {
       await fixtureOperation(
-        sources.organizations,
+        sources.provisioner,
         'organizations',
         tenant.id,
         'CREATE_TENANT',
@@ -152,6 +173,16 @@ try {
             'INSERT INTO organizations.business_group(tenant_id,id) VALUES($1,$2)',
             [tenant.id, tenant.groupId],
           );
+          return { fixture: true, tenantId: tenant.id };
+        },
+      );
+      await fixtureOperation(
+        sources.organizations,
+        'organizations',
+        tenant.id,
+        'CREATE_COMPANY',
+        `structure:${tenant.index}`,
+        async (manager) => {
           for (const [index, company] of tenant.companies.entries()) {
             await manager.query(
               "INSERT INTO organizations.organizational_unit(id,tenant_id,type,name) VALUES($1,$2,'COMPANY',$3),($4,$2,'BRANCH',$5)",
@@ -208,10 +239,7 @@ try {
               'INSERT INTO "authorization".role(id,tenant_id,name,description) VALUES($1,$2,$3,\'Synthetic benchmark role\')',
               [role.id, tenant.id, role.name],
             );
-            for (const permission of [
-              'a0000000-0000-4000-8000-000000000001',
-              'a0000000-0000-4000-8000-000000000002',
-            ])
+            for (const permission of permissionIds)
               await manager.query(
                 'INSERT INTO "authorization".role_permission(id,tenant_id,role_id,permission_id) VALUES($1,$2,$3,$4)',
                 [
@@ -325,11 +353,9 @@ try {
         }));
     const comparisons = [];
     for (const tenant of [tenants[0], tenants[1]]) {
-      const principal = {
-        issuer: issuer.issuer,
-        subject: tenant.identities[0].subject,
-        clientId: 'innoview-portal',
-      };
+      const principal = await verifier.verify(
+        await issuer.token(tenant.identities[0].subject),
+      );
       stage = 'api-scope:' + tenant.index;
       await scope.read(principal, tenant.id, async (manager) => {
         const queries = {
@@ -392,11 +418,9 @@ try {
       });
     }
     for (const tenant of [tenants[0], tenants[1]]) {
-      const principal = {
-        issuer: issuer.issuer,
-        subject: tenant.identities[0].subject,
-        clientId: 'innoview-portal',
-      };
+      const principal = await verifier.verify(
+        await issuer.token(tenant.identities[0].subject),
+      );
       // Exactly one current scope/membership check per transaction via the
       // existing owner contracts. Policies still perform every nested check.
       const queries = await scope.read(
@@ -425,7 +449,7 @@ try {
           const values = await manager.query(query.sql, query.params);
           const expected =
             query.name === 'permissions'
-              ? 2
+              ? width
               : query.name === 'scopes'
                 ? 1 + 2 * tenant.companies.length
                 : 1;
@@ -723,10 +747,23 @@ try {
               const [count] = await manager.query(sql);
               total += BigInt(count.rows);
             });
+        } else if (
+          schema === 'organizations' &&
+          ['company', 'branch'].includes(table)
+        ) {
+          for (const tenant of tenants)
+            await sources.organizations.transaction(async (manager) => {
+              await manager.query(
+                "SELECT set_config('innoview.tenant_id',$1,true)",
+                [tenant.id],
+              );
+              const [count] = await manager.query(sql);
+              total += BigInt(count.rows);
+            });
         } else {
           const source =
             schema === 'organizations'
-              ? sources.organizations
+              ? sources.maintenance
               : schema === 'memberships'
                 ? sources.membership
                 : sources.app;
@@ -769,6 +806,7 @@ try {
       "SELECT c.relname AS index,pg_relation_size(c.oid)::bigint AS bytes FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace WHERE n.nspname='authorization' AND c.relkind='i' AND c.relname IN ('assignment_member_scope','uq_active_role_assignment','assignment_tenant') ORDER BY c.relname",
     );
     return {
+      permissionsPerRole: width,
       seed: BENCHMARK_SEED,
       node: process.version,
       postgres: version.version,
@@ -779,7 +817,7 @@ try {
       evaluatorMeasurements: measurements,
       revocation,
       preparation:
-        'VACUUM (ANALYZE), outside transactions; schema12 indexable RLS, runtime evaluator plus frozen oracle; no OS cache flush',
+        'VACUUM (ANALYZE), outside transactions; schema14 indexable RLS/isolated operators, runtime evaluator plus frozen oracle; no OS cache flush',
       assignmentIndex:
         'Retain assignment_member_scope: measured exact-scope and small-membership index paths; no DDL or extra speculative index',
       approvedBaseline: baseline,
@@ -790,7 +828,7 @@ try {
     };
   });
   await writeFile(
-    new URL('./benchmark-result.json', import.meta.url),
+    new URL('./' + artifact, import.meta.url),
     JSON.stringify(report, null, 2) + '\n',
   );
   console.info(
@@ -803,7 +841,7 @@ try {
         query: p.query,
         executionMs: p.executionMs,
       })),
-      artifact: 'infra/authorization/benchmark-result.json',
+      artifact: 'infra/authorization/' + artifact,
     }),
   );
 } catch (error) {

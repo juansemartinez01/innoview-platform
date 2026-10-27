@@ -21,3 +21,9 @@ next-env.d.ts
 dist-test/
 
 .next-runtime-test/
+
+# PostgreSQL archives/manifests can contain tenant data and encrypted sessions.
+*.dump
+*.dump.json
+*.backup
+.local-backups/

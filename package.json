@@ -20,7 +20,7 @@
     "lint": "eslint . --max-warnings=0",
     "format": "prettier . --write",
     "format:check": "prettier . --check",
-    "test": "pnpm -r --if-present test && pnpm --filter @innoview/identity-bff build && pnpm --filter @innoview/api build && node --env-file-if-exists=.env --test --test-concurrency=1 infra/api/environment.test.mjs infra/keycloak/oidc.test.mjs infra/identity/runtime.test.mjs",
+    "test": "pnpm -r --if-present test && pnpm --filter @innoview/identity-bff build && pnpm --filter @innoview/api build && node --env-file-if-exists=.env --test --test-concurrency=1 infra/api/environment.test.mjs infra/keycloak/oidc.test.mjs infra/identity/runtime.test.mjs infra/operations/recovery.test.mjs",
     "oidc:provision": "node --env-file-if-exists=.env infra/keycloak/cli.mjs provision",
     "oidc:check": "node --env-file-if-exists=.env infra/keycloak/cli.mjs check",
     "db:provision": "pnpm --filter @innoview/api db:provision",
@@ -33,7 +33,14 @@
     "memberships:bootstrap": "pnpm --filter @innoview/api memberships:bootstrap",
     "db:diagnose": "pnpm --filter @innoview/api db:diagnose",
     "authorization:rls:benchmark": "pnpm --filter @innoview/api build && node --env-file-if-exists=.env infra/authorization/rls-benchmark.mjs",
-    "authorization:benchmark": "pnpm --filter @innoview/api build && node --env-file-if-exists=.env infra/authorization/benchmark.mjs"
+    "authorization:benchmark": "pnpm --filter @innoview/api build && node --env-file-if-exists=.env infra/authorization/benchmark.mjs",
+    "organizations:provision-tenant": "pnpm --filter @innoview/api build && node infra/operations/runtime.mjs provision-tenant",
+    "directory:maintain": "pnpm --filter @innoview/api build && node infra/operations/runtime.mjs directory",
+    "foundation:verify-clean": "node infra/operations/clean-install.mjs",
+    "security:matrix": "node infra/authorization/adversarial-matrix.mjs",
+    "db:backup": "pnpm --filter @innoview/api build && node infra/operations/runtime.mjs backup",
+    "authorization:benchmark:wide": "pnpm --filter @innoview/api build && node --env-file-if-exists=.env infra/authorization/benchmark.mjs --permissions-per-role=40",
+    "authorization:benchmark:compare": "node infra/authorization/compare-width.mjs"
   },
   "devDependencies": {
     "@eslint/js": "10.0.1",

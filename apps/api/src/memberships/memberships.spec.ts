@@ -1,3 +1,5 @@
+import { organizationsFixture } from '../organizations/organizations-fixture.spec.js';
+import { verifiedPrincipal } from '../authentication/verified-fixture.spec.js';
 import { organizationOperation } from '../operations/fixtures.spec.js';
 import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import assert from 'node:assert/strict';
@@ -7,7 +9,6 @@ import { fileURLToPath } from 'node:url';
 import type { TestContext } from 'node:test';
 import type { DataSource, EntityManager } from 'typeorm';
 import pg from 'pg';
-import { OrganizationsService } from '../organizations/organizations.service.js';
 import {
   IdentityService,
   IdentityReadTransactions,
@@ -52,7 +53,7 @@ export async function verifyMemberships(
   try {
     const writes = new MembershipsService(operator);
     const reads = new MembershipsService(app);
-    const organizations = new OrganizationsService(organizationOperator);
+    const organizations = await organizationsFixture(organizationOperator, env);
     const identities = new IdentityService(app);
     const tenantA = (
       await organizations.createTenant(
@@ -75,12 +76,8 @@ export async function verifyMemberships(
         organizationOperation(),
       )
     ).tenant.id;
-    const principalA = {
-      issuer: 'https://fixture.invalid',
-      subject: randomUUID(),
-      clientId: 'innoview-portal',
-    };
-    const principalB = { ...principalA, subject: randomUUID() };
+    const principalA = await verifiedPrincipal();
+    const principalB = await verifiedPrincipal();
     const identityA = (await identities.resolve(principalA)).id;
     const identityB = (await identities.resolve(principalB)).id;
     const transactions = new IdentityReadTransactions(app, identities);

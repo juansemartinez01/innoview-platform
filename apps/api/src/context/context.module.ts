@@ -1,3 +1,4 @@
+import { transientFailure } from '../operations/operation-context.js';
 import { securityEvent, databaseFailure } from '../security/security-events.js';
 import type { EntityManager } from 'typeorm';
 import {
@@ -115,6 +116,7 @@ export class ContextService {
         )) ?? []
       );
     } catch (error) {
+      if (!transientFailure(error)) throw error;
       securityEvent(databaseFailure(error));
       throw new ServiceUnavailableException('Context verification unavailable');
     }
@@ -127,7 +129,8 @@ export class ContextService {
         (_manager, option) => option,
       );
     } catch (error) {
-      if (error instanceof NotFoundException) throw error;
+      if (error instanceof NotFoundException || !transientFailure(error))
+        throw error;
       securityEvent(databaseFailure(error));
       throw new ServiceUnavailableException('Context verification unavailable');
     }

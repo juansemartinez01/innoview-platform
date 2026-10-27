@@ -1,0 +1,749 @@
+{
+  "phase": "before",
+  "command": "pnpm test",
+  "exitCode": 0,
+  "cases": [
+    {
+      "name": "configuration fails without secrets in validation errors",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "provisioning runs twice against an existing database without resetting data",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "both restricted roles lack elevated flags, memberships and database ownership",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "migrator applies the real migration and owns the technical table",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "application can CRUD with the identity sequence and cannot set its value",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "UserIdentity has a real unique pair, PK/FK integrity and minimal schema privileges",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "application cannot DDL, truncate, create temp tables, create roles or use migrator metadata",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "migrator cannot create databases, roles or objects outside its schemas",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "default ACLs cover future tables/sequences and do not expose functions",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "repeated provisioning preserves data and protects migration history",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "incorrect credentials are rejected; API startup accepts only a restricted role",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Organizations: two independent complete tenants and derived hierarchy with one status owner",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Organizations: unique group, IDs and typed correspondence are real PostgreSQL constraints",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Organizations: composite FKs reject cross-tenant parents and units, including SQL bypassing services",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Organizations: invalid levels, self cycles, missing parents and orphan units cannot commit",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Organizations: failures and deferred completeness violations roll back every related write",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Organizations: concurrent writers commit complete siblings without losing correspondence",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Organizations: lifecycle transitions, active ancestors and terminal archival are enforced by DB",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Organizations: RESTRICT and completeness protect deletion even for the migrator",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Organizations: restricted runtime ACLs survive repeated provisioning; BFFs cannot read structures",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "Memberships: many-to-many, active directory and idempotent concurrent creation",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Memberships: real unique pair, missing references, states and rollback without orphan audit",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Memberships: revocation is terminal, repeated concurrent revokes preserve first audit and subsequent reads reject it",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Memberships: API cannot write even via internal service, forge audit context or SET ROLE operator",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Memberships: operator has no elevated flags, private schema access, ownership, DDL, DELETE or mutable references",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Memberships: audit cannot be forged or deleted; transition and audit roll back atomically",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Memberships: transaction-local audit context does not leak to pooled connections",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Memberships: controlled real CLI bootstrap, repeatable without administrative credentials or implicit privileges",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Memberships: concurrent first-bootstrap targets yield exactly one first member",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Memberships: cross-domain FK RESTRICT and future tenant-composite references are enforced by PostgreSQL",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Memberships: credential purposes are not interchangeable, BFF cannot read and API needs no operator secret",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Memberships: repeated provisioning preserves history and exact ACLs; future tables stay private",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Context: module read contracts share one read-only snapshot across a concurrent revocation and organization change",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Context: no identity auto-registration or writes; transaction contracts reject an unbound manager",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "RLS: ENABLE/FORCE, actor-specific policies and unchanged restricted privileges",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "RLS: absent, empty, malformed and nonexistent contexts expose zero rows without UUID conversion errors",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "RLS: direct unfiltered SQL and joins expose only the scoped identity, across multiple tenants",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "RLS: commit, rollback and consecutive identities reuse the same backend without leaking LOCAL context",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "RLS: concurrent identity-scoped transactions on the real application pool never mix identities",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "RLS: restrictive boundary survives an additional permissive SELECT policy; application cannot change policy or write",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "RLS: operator reads complete history and revokes with atomic audit; application retains own history but no active membership",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "RLS: a policy rejection rolls back earlier membership and audit writes in the same operator transaction",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "RLS: global FK/unique integrity remains effective despite hidden rows and provisioning keeps the policies",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Organizations RLS: ENABLE/FORCE on every private table and exact API/operator privileges",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Organizations RLS: pretenant directory contains only own active options; private SQL and joins are closed",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Organizations RLS: validated tenant scope confines unfiltered SQL, private joins and module reads",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Organizations RLS: absent, malformed and foreign identity/tenant settings fail closed without casts",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Organizations RLS: restrictive boundaries survive permissive policies; directory columns cannot grow implicitly",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Organizations RLS: commit and rollback clean both LOCAL contexts on the same physical pool connection",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Organizations RLS: concurrent requests cannot contaminate identity or selected tenant",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Organizations RLS: API cannot administer even with valid context; operator audit and directory are derived and atomic",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Organizations RLS: future objects remain private and provisioning repairs column grants without widening roles",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Organizations RLS: revocation, inactive/archived tenant and inactive group close subsequent scopes",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Operations: canonical tenant retry and concurrent requests return exactly one original result and audit history",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Operations: company and branch retries, UUID normalization, cross-tenant request conflicts and omitted/null arguments",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Operations: state replay preserves original result, no-op changes produce no duplicate events, rollback is atomic",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Audit: explicit technical provenance, real future Identity FK, no fabricated user actors or mutation of completed history",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Read contract: missing, global, foreign and noncontextual EntityManagers are rejected before private SQL",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Catalog: discovers all managed tables, enforces explicit exceptions and detects column ACL, RLS and policy dependency drift",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Directory: read-only diagnostic detects isolated tampering and does not repair or bypass RLS",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Timeouts: fresh real connections receive role-specific defaults; migrator and bootstrap retain administrative settings",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Timeouts: actual statement default cancels SQL, rolls back LOCAL contexts and recovers the TypeORM pool",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Timeouts: transaction and idle termination discard dead connections; new pooled connections are clean",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Events: correlation is isolated, hostile headers replaced, SQLSTATE classified without logging sensitive error objects",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Fingerprints: recursive v2 is deterministic, ordered arrays and omission/null/value differ; unsupported structures reject",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Fingerprints: new operations are v2, nested-key equivalence and incompatible replay remain explicit",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Triggers: malformed, missing and noncanonical GUC reject with 42501 in both functions, never 22P02",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Operation UPDATE: mismatched request cannot complete another pending row; current context can complete and then history is immutable",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Audit: no historical default for new rows; verified provenance requires technical source without rewriting legacy",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Plans: 20000 safe synthetic operation records expose the old scan and UUID PK index paths for both trigger predicates",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Locks: real operator lock_timeout cancels without partial records or audit, then the pool retries successfully",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Locks: application timeout rolls back LOCAL context and recovers the same pooled connection",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Locks: migrator DDL times out with 55P03; transactional schema and history remain unchanged and retry succeeds",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Authorization catalog: stable namespace, migrator-only mutation, bigint real-change version and terminal deprecation",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Authorization model: same role name across tenants, unique grants, composite membership/role and typed OU FKs",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Authorization assignment: real owner contracts reject revoked memberships, inactive/archived scope and inactive ancestors",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Authorization RLS: API and operator without context or malformed tenant fail closed; own scope excludes foreign rows",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Authorization RLS: additional permissive policy cannot widen either API or operator restrictive frontier",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Authorization history: terminal revocation, reassignment creates a new row, no permission inheritance or implicit assignments",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Authorization operations: concurrent idempotence, module/version envelope, conflict across tenant and atomic audit rollback",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Authorization revision: bigint atomic increments serialize tenant changes, no-op and replay do not increment",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Authorization availability: stored ACTIVE grants survive deprecation/revocation/inactive ancestor but are not claimed effective",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Authorization pool: commit, rollback, contention and concurrency never leak LOCAL context or partial audit",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Authorization port: registered evaluator is separate from trusted writes; API cannot perform trusted writes",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Authorization diagnostics: explicit catalog/tenant classification detects operator catalog mutation, unexpected tables and policies",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "N1/N2: Organizations concurrent replay tolerates a bounded delay greater than role default and uses one fingerprint version constant",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Preparation: committed replay survives revoked membership, inactive unit/role/tenant; incompatible envelopes still conflict",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Preparation: commit between precheck and failed owner validation returns the original replay",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Preparation: saturated membership pool holds no Authorization transaction/revision lock and recovers atomically",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Preparation: saturated organizations pool holds no Authorization transaction/revision lock and recovers atomically",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "Authorization timeout: inside own delayed writer is 8s, concurrent uncommitted replay survives revocation and resets to 1s",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Access: verified principal, runtime context provenance, active source/transaction/GUC and lifecycle fail closed",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "Access: exact scopes, no GROUP/COMPANY inheritance, no grant for other identities/tenants or typed/malformed scope",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Access: full-set differential oracle, scopes/can coherence, duplicated grants and bounded SQL query counts",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Access: D-7 inactive role retains ACTIVE grants/assignment but denies, and grant/assignment revocation takes effect",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Access: company/branch/group/tenant and archived ancestors invalidate effective descendants without deleting grants",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Access: deprecated known permission is NO_GRANT, unknown is internal-only and telemetry is once per context",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Access: snapshot revocation, unchanged RBAC versions and subsequent reads; same physical pool clears LOCAL after commit/rollback",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "real migration reverts and reapplies only in this disposable database",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "PostgreSQL real: provisioning, restricted roles and versioned migrations (not tenant isolation)",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "API allowlist admits only application configuration and OS essentials, never file-based OS/Node options",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "API startup guard rejects privileged configuration, unknown secrets and case variants without disclosing values",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "direct compiled entry with an accidental full env file fails before NestJS loads or connects",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "API grandchildren inherit the sanitized environment without Node preload or env-file flags",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "normal pnpm API dev starts a restricted Nest child without privileged credentials",
+      "passed": true,
+      "layer": "PostgreSQL"
+    },
+    {
+      "name": "normal compiled API and both BFF launchers preserve credential separation",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "HTTPS cookies are Secure and HTTP requires explicit loopback development",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "CSRF, Origin and unregistered return destinations are rejected",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "HTTP correlation validates external IDs and associates authentication rejection without sensitive metadata",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "both real frontends login via Code+PKCE; cookies and identities are separate",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "local identity is created at login and shared by repeated Portal/Control Center authentication without affiliations",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "login never creates memberships or implies tenant access",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "authenticated callers cannot expose Organizations through guessed UUID routes",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "first concurrent registration for a second authenticated subject returns exactly one new stable UUID",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "an authenticated legacy 1.2 session acquires its UUID without discarding the session",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Context: own active options only, no private organization data or identity substitution",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "RLS runtime: concurrent verified JWT identities and direct unfiltered application SQL stay isolated",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "Context: real Chromium Portal selector changes, persists, clears and respects empty/Control Center views",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Context: invalid JWT is 401, Control Center has no selector, unknown local principal is not registered",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "Context: select, change and clear persist only in Portal server session; foreign and malformed UUIDs fail",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Context: CSRF, Origin, duplicate fields and stale revisions cannot modify selection",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Context: concurrent selection and genuine refresh preserve tokens and do not lose selection changes",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Context: inactive group/OU or tenant invalidates selection; archived tenant is unavailable",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Context: later membership revocation clears persisted selection on next check and cannot be authority",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Context: logout and racing updates cannot resurrect server selection; CC schema remains unchanged",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "RBAC HTTP: real Keycloak JWT A allows minimal Company DTO; valid member B lacks permission; foreign tenant C denied",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "RBAC HTTP: inactive role, unavailable unit/ancestor/tenant and deprecated Permission deny without exposing Company data",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "state and nonce tampering consume the transaction and cannot establish a session",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Nest /auth/me accepts only API access tokens and returns a minimal principal",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "Nest rejects genuinely signed Keycloak tokens with an invalid audience or expired lifetime",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "concurrent refresh requests across HTTP handlers rotate once without token reuse",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "expired, revoked and uncertain-refresh sessions fail closed",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "local logout revokes the old cookie and server validates real SSO returns for both frontends",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "SSO return rejects missing, incorrect and duplicate state; failed transactions cannot be replayed",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "no passwords or tokens in application logs or BFF browser responses",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "runtime BFF + NestJS against disposable PostgreSQL and Keycloak (no business authorization)",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "explicit v1 to v2 logout migration preserves clients/users/keys, rejects drift and resumes interruptions",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "create from initialized master, repeat read-only and preserve master",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "discovery, canonical issuer, usable public JWKS and openid-client compatibility",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "PKCE is mandatory and unregistered redirects and legacy grants are rejected",
+      "passed": true,
+      "layer": "RBAC evaluator / trusted service"
+    },
+    {
+      "name": "Code + PKCE for both clients issues API-only access tokens; ID tokens are not API tokens",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "forged access tokens are rejected; refresh rotation and RP logout enforce the contract",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "drift is detected without modifying the existing client or unrelated clients",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "administrative helper renews an expired short-lived token on disposable Keycloak",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "unmanaged innoview realm is refused and preserved (disposable server only)",
+      "passed": true,
+      "layer": "trusted service / regression"
+    },
+    {
+      "name": "real disposable Keycloak: reproducible OIDC contract, tokens and safe drift rejection",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    },
+    {
+      "name": "JWT acceptance contract with synthetic keys: reject wrong issuer/audience/algorithm/expiry/type",
+      "passed": true,
+      "layer": "HTTP/OIDC/runtime"
+    }
+  ],
+  "limitations": [
+    "Layer labels describe test coverage, not equivalent security boundaries; inspect individual assertions.",
+    "RLS does not authenticate SQL operators who control their connection and GUCs.",
+    "Same-tenant arbitrary SQL is not company/branch RBAC; HTTP operations must authorize in their transaction."
+  ],
+  "baseCommit": "07f6b59258306bf67074b402cd71145707c83283",
+  "measurementSource": "approved base before control changes"
+}

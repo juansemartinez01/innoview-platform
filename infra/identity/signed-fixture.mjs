@@ -18,12 +18,12 @@ export async function signedFixture() {
   const issuer = `http://127.0.0.1:${server.address().port}/realms/fixture`;
   return {
     issuer,
-    token: (subject) =>
+    token: (subject, overrides = {}) =>
       new SignJWT({ typ: 'Bearer', azp: 'innoview-portal' })
         .setProtectedHeader({ alg: 'RS256', kid: jwk.kid })
-        .setIssuer(issuer)
+        .setIssuer(overrides.issuer ?? issuer)
         .setSubject(subject)
-        .setAudience('innoview-api')
+        .setAudience(overrides.audience ?? 'innoview-api')
         .setIssuedAt()
         .setExpirationTime('2m')
         .sign(privateKey),

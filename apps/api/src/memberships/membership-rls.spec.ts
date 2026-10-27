@@ -1,3 +1,8 @@
+import { organizationsFixture } from '../organizations/organizations-fixture.spec.js';
+import {
+  verifiedPrincipal,
+  invalidPrincipalFixture,
+} from '../authentication/verified-fixture.spec.js';
 import { organizationOperation } from '../operations/fixtures.spec.js';
 import { initializeOrganizationsOperatorDataSource } from '../persistence/data-sources.js';
 import assert from 'node:assert/strict';
@@ -9,7 +14,6 @@ import {
   IdentityService,
   IdentityReadTransactions,
 } from '../identity/identity.module.js';
-import { OrganizationsService } from '../organizations/organizations.service.js';
 import {
   createDataSource,
   initializeMembershipOperatorDataSource,
@@ -42,7 +46,7 @@ export async function verifyMembershipRls(
   await single.initialize();
   try {
     const identities = new IdentityService(app);
-    const organizations = new OrganizationsService(organizationOperator);
+    const organizations = await organizationsFixture(organizationOperator, env);
     const writes = new MembershipsService(operator);
     const reads = new MembershipsService(app);
     const scoped = new IdentityReadTransactions(app, identities);
@@ -50,16 +54,41 @@ export async function verifyMembershipRls(
       single,
       new IdentityService(single),
     );
-    const a = {
-      issuer: 'https://rls-fixture.invalid',
-      subject: randomUUID(),
-      clientId: 'innoview-portal',
-    };
-    const b = { ...a, subject: randomUUID() };
-    const empty = { ...a, subject: randomUUID() };
+    const a = await verifiedPrincipal();
+    const b = await verifiedPrincipal();
+    const empty = await verifiedPrincipal();
     const idA = (await identities.resolve(a)).id;
     const idB = (await identities.resolve(b)).id;
     const idEmpty = (await identities.resolve(empty)).id;
+    await t.test(
+      'Principal provenance: verified original admitted, literal and spread clones rejected before acquiring a transaction',
+      async () => {
+        let called = false;
+        for (const forged of [
+          { issuer: a.issuer, subject: a.subject, clientId: a.clientId },
+          { ...a },
+        ]) {
+          assert.equal(
+            await scoped.read(forged, () => {
+              called = true;
+              return Promise.resolve();
+            }),
+            null,
+          );
+        }
+        assert.equal(called, false);
+        assert.equal(
+          await scoped.read(a, (_manager, id) => Promise.resolve(id)),
+          idA,
+        );
+        await assert.rejects(
+          invalidPrincipalFixture({ issuer: 'https://foreign.invalid' }),
+        );
+        await assert.rejects(
+          invalidPrincipalFixture({ audience: 'foreign-api' }),
+        );
+      },
+    );
     const tenants = await Promise.all(
       ['RLS A', 'RLS A second', 'RLS B', 'RLS rollback'].map((name) =>
         organizations.createTenant(
@@ -239,7 +268,7 @@ export async function verifyMembershipRls(
         );
         let called = false;
         assert.equal(
-          await scoped.read({ ...a, subject: randomUUID() }, () => {
+          await scoped.read(await verifiedPrincipal(), () => {
             called = true;
             return Promise.resolve(true);
           }),

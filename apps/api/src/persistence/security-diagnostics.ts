@@ -71,7 +71,7 @@ export async function securityInvariants(source: DataSource) {
       OR EXISTS(SELECT 1 FROM pg_database WHERE datdba=r.oid)
       OR has_database_privilege(rolname,current_database(),'CREATE,TEMP')
       OR EXISTS(SELECT 1 FROM pg_namespace WHERE has_schema_privilege(rolname,oid,'CREATE')) AS unsafe
-      FROM pg_roles r WHERE shobj_description(r.oid,'pg_authid') LIKE 'innoview:'||current_database()||':%' AND shobj_description(r.oid,'pg_authid') NOT LIKE '%:migrator'`);
+      FROM pg_roles r WHERE left(shobj_description(r.oid,'pg_authid'),length('innoview:'||current_database()||':'))='innoview:'||current_database()||':' AND split_part(shobj_description(r.oid,'pg_authid'),':',3)<>'migrator'`);
     for (const kind of [
       'app',
       'portal',
@@ -79,6 +79,8 @@ export async function securityInvariants(source: DataSource) {
       'membership',
       'organizations',
       'authorization',
+      'organizations_provisioner',
+      'directory_maintenance',
     ])
       if (roles.filter((r) => r.kind === kind).length !== 1)
         findings.push(`ROLE_CONTRACT:${kind}`);
@@ -108,7 +110,10 @@ export async function securityInvariants(source: DataSource) {
         qual: string | null;
         with_check: string | null;
       }[]
-    >('SELECT * FROM pg_policies WHERE schemaname=ANY($1)', [schemas]);
+    >(
+      'SELECT *,roles::text[] AS roles FROM pg_policies WHERE schemaname=ANY($1)',
+      [schemas],
+    );
     for (const table of tables) {
       const path = `${table.schema}.${table.name}`;
       const isPrivate =
@@ -122,11 +127,131 @@ export async function securityInvariants(source: DataSource) {
       const authScoped =
         table.schema === 'authorization' &&
         authorizationScoped.includes(table.name);
+      const repairScoped =
+        table.schema === 'organizations' &&
+        ['directory_repair_operation', 'directory_repair_event'].includes(
+          table.name,
+        );
       if (
-        (isPrivate || identityScoped || directory || internal || authScoped) &&
+        (isPrivate ||
+          identityScoped ||
+          directory ||
+          internal ||
+          authScoped ||
+          repairScoped) &&
         (!table.rls || !table.force)
       )
         findings.push(`RLS_FLAGS:${path}`);
+      if (isPrivate || directory || internal || repairScoped) {
+        const kind = repairScoped ? 'directory_maintenance' : 'organizations';
+        const actor = roles.find((row) => row.kind === kind)?.name;
+        const expected = `(${table.name === 'tenant' ? 'id' : 'tenant_id'} = ${safeUuid('tenant_id')})`;
+        const boundary = policies.find(
+          (p) =>
+            p.schemaname === 'organizations' &&
+            p.tablename === table.name &&
+            p.policyname ===
+              (repairScoped ? 'maintenance_boundary' : 'operator_boundary') &&
+            p.roles.length === 1 &&
+            p.roles[0] === actor,
+        );
+        if (
+          !boundary ||
+          boundary.permissive !== 'RESTRICTIVE' ||
+          boundary.cmd !== 'ALL' ||
+          compact(boundary.qual) !== compact(expected) ||
+          compact(boundary.with_check) !== compact(expected)
+        )
+          findings.push(`ORGANIZATIONS_BOUNDARY:${path}:${kind}`);
+      }
+      if (
+        table.schema === 'organizations' &&
+        (isPrivate || directory || internal || repairScoped)
+      ) {
+        const basic = `(${table.name === 'tenant' ? 'id' : 'tenant_id'} = ${safeUuid('tenant_id')})`;
+        for (const kind of [
+          'organizations',
+          'organizations_provisioner',
+          'directory_maintenance',
+        ]) {
+          const actor = roles.find((row) => row.kind === kind)?.name;
+          const actual = policies.filter(
+            (p) =>
+              p.schemaname === 'organizations' &&
+              p.tablename === table.name &&
+              p.roles.includes(actor ?? ''),
+          );
+          let count = 0;
+          if (kind === 'organizations' && !repairScoped)
+            count =
+              table.name === 'tenant'
+                ? 3
+                : [
+                      'organizational_unit',
+                      'tenant_directory',
+                      'operation',
+                    ].includes(table.name)
+                  ? 4
+                  : 3;
+          if (
+            kind === 'organizations_provisioner' &&
+            !repairScoped &&
+            !['company', 'branch'].includes(table.name)
+          ) {
+            count = ['tenant', 'tenant_directory', 'operation'].includes(
+              table.name,
+            )
+              ? 4
+              : 3;
+            const expected =
+              table.name === 'operation'
+                ? `((operation_type = 'CREATE_TENANT'::text) AND (request_id = ${safeUuid('organization_request')}) AND ((tenant_id IS NULL) OR (tenant_id = ${safeUuid('tenant_id')}) OR (completed_at IS NOT NULL)))`
+                : table.name === 'organizational_unit'
+                  ? `(${basic} AND ((type)::text = 'GROUP'::text))`
+                  : basic;
+            const p = actual.find(
+              (row) => row.policyname === 'provisioner_boundary',
+            );
+            if (
+              !p ||
+              p.permissive !== 'RESTRICTIVE' ||
+              p.cmd !== 'ALL' ||
+              compact(p.qual) !== compact(expected) ||
+              compact(p.with_check) !== compact(expected)
+            )
+              findings.push(`PRETENANT_BOUNDARY:${path}`);
+          }
+          if (kind === 'directory_maintenance') {
+            count = repairScoped
+              ? table.name === 'directory_repair_operation'
+                ? 4
+                : 3
+              : directory
+                ? 7
+                : ['company', 'branch'].includes(table.name)
+                  ? 0
+                  : 1;
+            if (directory)
+              for (const command of ['insert', 'update', 'delete']) {
+                const p = actual.find(
+                  (row) => row.policyname === `maintenance_${command}_boundary`,
+                );
+                if (
+                  !p ||
+                  p.permissive !== 'RESTRICTIVE' ||
+                  p.cmd !== command.toUpperCase() ||
+                  compact(p.qual) !==
+                    compact(command === 'insert' ? null : basic) ||
+                  compact(p.with_check) !==
+                    compact(command === 'delete' ? null : basic)
+                )
+                  findings.push(`REPAIR_WRITE_BOUNDARY:${command}`);
+              }
+          }
+          if (actual.length !== count)
+            findings.push(`ORGANIZATIONS_POLICY_COUNT:${kind}:${path}`);
+        }
+      }
       if (isPrivate || identityScoped || directory) {
         const expected = identityScoped
           ? identityQual
@@ -248,11 +373,51 @@ export async function securityInvariants(source: DataSource) {
             table.schema === 'organizations' &&
             (isPrivate || directory || internal)
           ) {
-            allowed.push('SELECT', 'INSERT');
+            allowed.push('SELECT');
+            if (table.name !== 'tenant') allowed.push('INSERT');
             if (
               directory ||
               (['tenant', 'organizational_unit'].includes(table.name) &&
                 ['status', 'updated_at'].includes(column)) ||
+              (table.name === 'operation' &&
+                ['tenant_id', 'result', 'completed_at'].includes(column))
+            )
+              allowed.push('UPDATE');
+          }
+          if (
+            role.kind === 'directory_maintenance' &&
+            table.schema === 'organizations' &&
+            ((isPrivate && !['company', 'branch'].includes(table.name)) ||
+              directory ||
+              internal)
+          )
+            allowed.push('SELECT');
+          if (role.kind === 'directory_maintenance' && directory)
+            allowed.push('INSERT', 'UPDATE');
+          if (role.kind === 'directory_maintenance' && repairScoped) {
+            allowed.push('SELECT', 'INSERT');
+            if (
+              table.name === 'directory_repair_operation' &&
+              ['result', 'completed_at'].includes(column)
+            )
+              allowed.push('UPDATE');
+          }
+          if (
+            role.kind === 'organizations_provisioner' &&
+            table.schema === 'organizations' &&
+            [
+              'tenant',
+              'organizational_unit',
+              'business_group',
+              'tenant_directory',
+              'audit_event',
+              'operation',
+            ].includes(table.name)
+          ) {
+            allowed.push('SELECT', 'INSERT');
+            if (
+              directory ||
+              (table.name === 'tenant' && column === 'id') ||
               (table.name === 'operation' &&
                 ['tenant_id', 'result', 'completed_at'].includes(column))
             )
@@ -312,11 +477,12 @@ export async function securityInvariants(source: DataSource) {
               );
         }
         const deleteAllowed =
+          (role.kind === 'directory_maintenance' && directory) ||
           (role.kind === 'app' && path === 'foundation.persistence_probe') ||
           path ===
             `${role.kind === 'portal' ? 'portal_sessions' : role.kind === 'control' ? 'control_sessions' : 'none'}.sessions`;
         const [acl] = await manager.query<{ del: boolean; danger: boolean }[]>(
-          "SELECT has_table_privilege($1,$2::oid,'DELETE') AS del,has_table_privilege($1,$2::oid,'TRUNCATE,TRIGGER,REFERENCES') AS danger",
+          "SELECT has_table_privilege($1,$2::oid,'DELETE') AS del,has_table_privilege($1,$2::oid,'TRUNCATE,TRIGGER,REFERENCES,MAINTAIN') AS danger",
           [role.name, table.oid],
         );
         if (acl.del !== deleteAllowed || acl.danger)
@@ -342,6 +508,8 @@ export async function securityInvariants(source: DataSource) {
       'organizations.tenant_directory',
       'organizations.audit_event',
       'organizations.operation',
+      'organizations.directory_repair_operation',
+      'organizations.directory_repair_event',
       ...authorizationScoped.map((table) => `authorization.${table}`),
     ];
     const expected = new Set([...exceptions, ...scopedContracts]);
@@ -407,7 +575,11 @@ export async function securityInvariants(source: DataSource) {
               ? ['control_sessions']
               : role.kind === 'membership'
                 ? ['memberships']
-                : role.kind === 'organizations'
+                : [
+                      'organizations',
+                      'organizations_provisioner',
+                      'directory_maintenance',
+                    ].includes(role.kind)
                   ? ['organizations']
                   : role.kind === 'authorization'
                     ? ['authorization']
@@ -473,10 +645,12 @@ export async function directoryDifferences(manager: EntityManager) {
   if (!manager.queryRunner?.isTransactionActive)
     throw new Error('Active diagnostic transaction required');
   const [actor] = await manager.query<{ trusted: boolean }[]>(
-    "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':organizations' AS trusted FROM pg_roles WHERE rolname=current_user",
+    "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':directory_maintenance' AS trusted FROM pg_roles WHERE rolname=current_user",
   );
   if (!actor?.trusted)
-    throw new Error('Organizations operator required for complete diagnosis');
+    throw new Error(
+      'Directory maintenance operator required for complete diagnosis',
+    );
   return manager.query<
     { tenant_id: string; issues: string[] }[]
   >(`WITH expected AS (

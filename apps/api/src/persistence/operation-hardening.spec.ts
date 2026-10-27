@@ -1,3 +1,7 @@
+import {
+  organizationsFixture,
+  organizationsDiagnosticFixture,
+} from '../organizations/organizations-fixture.spec.js';
 import { TrustedOperationTransientError } from '../operations/operation-context.js';
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
@@ -13,10 +17,7 @@ import {
   canonicalArguments,
   operationFingerprint,
 } from '../operations/fingerprint.js';
-import {
-  OrganizationsService,
-  OrganizationOperationConflictError,
-} from '../organizations/organizations.service.js';
+import { OrganizationOperationConflictError } from '../organizations/organizations.service.js';
 import {
   Tenant,
   OrganizationalUnit,
@@ -41,7 +42,12 @@ function state(error: unknown, code: string) {
 async function setContext(
   manager: EntityManager,
   operation: OrganizationOperation,
+  tenantId?: string,
 ) {
+  if (tenantId)
+    await manager.query("SELECT set_config('innoview.tenant_id',$1,true)", [
+      tenantId,
+    ]);
   await manager.query(
     "SELECT set_config('innoview.organization_request',$1,true),set_config('innoview.organization_actor',$2,true),set_config('innoview.organization_reason',$3,true),set_config('innoview.organization_actor_type',$4,true)",
     [
@@ -174,8 +180,10 @@ export async function versionOneFixture(operator: DataSource) {
 export async function verifyVersionOneUpgrade(
   operator: DataSource,
   fixture: Awaited<ReturnType<typeof versionOneFixture>>,
+  env: Environment,
 ) {
-  const service = new OrganizationsService(operator);
+  const service = await organizationsFixture(operator, env);
+  const diagnostic = await organizationsDiagnosticFixture(operator, env);
   assert.deepEqual(
     JSON.parse(
       JSON.stringify(
@@ -184,7 +192,7 @@ export async function verifyVersionOneUpgrade(
     ),
     fixture.result,
   );
-  const [stored] = await operator.query<
+  const [stored] = await diagnostic.query<
     { fingerprint_version: number; fingerprint: string }[]
   >(
     'SELECT fingerprint_version,fingerprint FROM organizations.operation WHERE request_id=$1',
@@ -195,7 +203,7 @@ export async function verifyVersionOneUpgrade(
     fingerprint: fixture.fingerprint,
   });
   assert.deepEqual(
-    await operator.query(
+    await diagnostic.query(
       'SELECT * FROM organizations.audit_event WHERE operation_request_id=$1 ORDER BY id',
       [fixture.context.requestId],
     ),
@@ -214,7 +222,7 @@ export async function verifyVersionOneUpgrade(
   );
   assert.deepEqual(
     (
-      await operator.query<
+      await diagnostic.query<
         { fingerprint_version: number; fingerprint: string }[]
       >(
         'SELECT fingerprint_version,fingerprint FROM organizations.operation WHERE request_id=$1',
@@ -224,7 +232,7 @@ export async function verifyVersionOneUpgrade(
     { fingerprint_version: 1, fingerprint: fixture.company.fingerprint },
   );
   assert.deepEqual(
-    await operator.query(
+    await diagnostic.query(
       'SELECT * FROM organizations.audit_event WHERE operation_request_id=$1 ORDER BY id',
       [fixture.company.context.requestId],
     ),
@@ -270,7 +278,8 @@ export async function verifyOperationHardening(
 ) {
   assert.match(env.DB_NAME ?? '', /^innoview_test_[a-f0-9]{32}$/);
   const operator = await initializeOrganizationsOperatorDataSource(env);
-  const writes = new OrganizationsService(operator);
+  const writes = await organizationsFixture(operator, env);
+  const diagnostic = await organizationsDiagnosticFixture(operator, env);
   try {
     const record = await writes.createTenant(
       'Trigger hardening fixture',
@@ -368,7 +377,7 @@ export async function verifyOperationHardening(
           ),
           company,
         );
-        const [row] = await operator.query<{ fingerprint_version: number }[]>(
+        const [row] = await diagnostic.query<{ fingerprint_version: number }[]>(
           'SELECT fingerprint_version FROM organizations.operation WHERE request_id=$1',
           [context.requestId],
         );
@@ -457,7 +466,7 @@ export async function verifyOperationHardening(
       async () => {
         const context = organizationOperation();
         await operator.transaction(async (manager) => {
-          await setContext(manager, context);
+          await setContext(manager, context, record.tenant.id);
           await manager.query(
             "INSERT INTO organizations.operation(request_id,tenant_id,operation_type,fingerprint,actor,actor_type,reason,technical_source,fingerprint_version) VALUES($1,$2,'SET_STATUS',$3,$4,$5,$6,'fixture:update',2)",
             [
@@ -496,7 +505,7 @@ export async function verifyOperationHardening(
         });
         await assert.rejects(
           operator.transaction(async (manager) => {
-            await setContext(manager, context);
+            await setContext(manager, context, record.tenant.id);
             await manager.query(
               "UPDATE organizations.operation SET result='{}' WHERE request_id=$1",
               [context.requestId],
@@ -513,7 +522,7 @@ export async function verifyOperationHardening(
           "SELECT atthasdef AS has_default FROM pg_attribute WHERE attrelid='organizations.audit_event'::regclass AND attname='actor_type'",
         );
         assert.equal(column.has_default, false);
-        const [operation] = await operator.query<{ request_id: string }[]>(
+        const [operation] = await diagnostic.query<{ request_id: string }[]>(
           'SELECT request_id FROM organizations.operation WHERE tenant_id=$1 LIMIT 1',
           [record.tenant.id],
         );
@@ -553,7 +562,7 @@ export async function verifyOperationHardening(
         const context = organizationOperation();
         for (let batch = 0; batch < 20; batch++)
           await operator.transaction(async (manager) => {
-            await setContext(manager, context);
+            await setContext(manager, context, record.tenant.id);
             await manager.query(
               "SELECT set_config('innoview.fixture_tenant',$1,true)",
               [record.tenant.id],
@@ -568,7 +577,7 @@ export async function verifyOperationHardening(
         END $$`);
           });
         await migrator.query('ANALYZE organizations.operation');
-        const [{ request_id: target }] = await operator.query<
+        const [{ request_id: target }] = await diagnostic.query<
           { request_id: string }[]
         >(
           'SELECT request_id FROM organizations.operation WHERE tenant_id=$1 LIMIT 1',
@@ -579,7 +588,7 @@ export async function verifyOperationHardening(
             {
               'QUERY PLAN': [document],
             },
-          ] = await operator.query<{ 'QUERY PLAN': { Plan: Plan }[] }[]>(
+          ] = await diagnostic.query<{ 'QUERY PLAN': { Plan: Plan }[] }[]>(
             `EXPLAIN(FORMAT JSON) SELECT o.* FROM organizations.operation o WHERE ${predicate} AND o.completed_at IS NULL AND o.actor=$2 AND o.reason=$3 AND o.actor_type=$4`,
             [target, context.actor, context.reason, context.actorType],
           );
@@ -645,6 +654,9 @@ export async function verifyOperationHardening(
         const blocker = operator.createQueryRunner();
         await blocker.connect();
         await blocker.startTransaction();
+        await blocker.query("SELECT set_config('innoview.tenant_id',$1,true)", [
+          record.tenant.id,
+        ]);
         const context = organizationOperation();
         try {
           await blocker.query(
@@ -662,14 +674,14 @@ export async function verifyOperationHardening(
             TrustedOperationTransientError,
           );
           assert.deepEqual(
-            await operator.query(
+            await diagnostic.query(
               'SELECT request_id FROM organizations.operation WHERE request_id=$1',
               [context.requestId],
             ),
             [],
           );
           assert.deepEqual(
-            await operator.query(
+            await diagnostic.query(
               'SELECT id FROM organizations.audit_event WHERE request_id=$1',
               [context.requestId],
             ),
@@ -707,6 +719,9 @@ export async function verifyOperationHardening(
         const blocker = migrator.createQueryRunner();
         await blocker.connect();
         await blocker.startTransaction();
+        await blocker.query("SELECT set_config('innoview.tenant_id',$1,true)", [
+          record.tenant.id,
+        ]);
         const [before] = await single.query<{ pid: number }[]>(
           'SELECT pg_backend_pid() AS pid',
         );
@@ -754,6 +769,9 @@ export async function verifyOperationHardening(
         const blocker = operator.createQueryRunner();
         await blocker.connect();
         await blocker.startTransaction();
+        await blocker.query("SELECT set_config('innoview.tenant_id',$1,true)", [
+          record.tenant.id,
+        ]);
         const probe = createDataSource('migrator', env);
         probe.setOptions({ migrations: [LockContentionProbe1793041200000] });
         await probe.initialize();

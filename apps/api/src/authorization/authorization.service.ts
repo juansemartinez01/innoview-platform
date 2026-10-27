@@ -1,11 +1,8 @@
 import { Inject, Injectable, Optional } from '@nestjs/common';
 import { DataSource, type EntityManager } from 'typeorm';
-import { createHash } from 'node:crypto';
 import { hostname, userInfo } from 'node:os';
-import {
-  canonicalArguments,
-  CURRENT_FINGERPRINT_VERSION,
-} from '../operations/fingerprint.js';
+import { CURRENT_FINGERPRINT_VERSION } from '../operations/fingerprint.js';
+import { authorizationFingerprint } from './fingerprint.js';
 import {
   technicalOperation,
   establishOperationContext,
@@ -81,11 +78,13 @@ export class AuthorizationService {
     manager: EntityManager,
     tenantId: string,
     op: TechnicalOperation,
-    fingerprint: string,
+    type: string,
+    args: Record<string, unknown>,
   ): Promise<{ result: T } | undefined> {
     const [old] = await manager.query<
       {
         fingerprint: string;
+        fingerprint_version: number;
         actor: string;
         actor_type: string;
         reason: string;
@@ -93,12 +92,13 @@ export class AuthorizationService {
         completed_at: Date | null;
       }[]
     >(
-      'SELECT fingerprint,actor,actor_type,reason,result,completed_at FROM "authorization".operation WHERE tenant_id=$1 AND request_id=$2',
+      'SELECT fingerprint,fingerprint_version,actor,actor_type,reason,result,completed_at FROM "authorization".operation WHERE tenant_id=$1 AND request_id=$2',
       [tenantId, op.requestId],
     );
     if (!old) return undefined;
     if (
-      old.fingerprint !== fingerprint ||
+      old.fingerprint !==
+        authorizationFingerprint(old.fingerprint_version, type, args) ||
       old.actor !== op.actor ||
       old.actor_type !== op.actorType ||
       old.reason !== op.reason
@@ -120,16 +120,11 @@ export class AuthorizationService {
     try {
       tenantId = uuid(tenantId);
       const op = technicalOperation(input);
-      const fingerprint = createHash('sha256')
-        .update(
-          canonicalArguments({
-            module: 'authorization',
-            version: CURRENT_FINGERPRINT_VERSION,
-            operation: type,
-            args,
-          }),
-        )
-        .digest('hex');
+      const fingerprint = authorizationFingerprint(
+        CURRENT_FINGERPRINT_VERSION,
+        type,
+        args,
+      );
       let preparationError: unknown;
       let preparationFailed = false;
       if (prepare) {
@@ -138,7 +133,7 @@ export class AuthorizationService {
           async (manager) => {
             await manager.query('SET TRANSACTION READ ONLY');
             await this.operationContext(manager, tenantId, op);
-            return this.previous<T>(manager, tenantId, op, fingerprint);
+            return this.previous<T>(manager, tenantId, op, type, args);
           },
         );
         if (previous) {
@@ -178,7 +173,8 @@ export class AuthorizationService {
               manager,
               tenantId,
               op,
-              fingerprint,
+              type,
+              args,
             );
             if (!old)
               throw new AuthorizationOperationError('REQUEST_ID_CONFLICT');

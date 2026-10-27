@@ -1,3 +1,4 @@
+import { organizationsFixture } from '../organizations/organizations-fixture.spec.js';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import type { TestContext } from 'node:test';
@@ -26,6 +27,7 @@ import {
   AuthorizationReads,
 } from './access.runtime.js';
 import type { AuthorizationContext, Scope } from './access.contract.js';
+import { establishOperationContext } from '../operations/operation-context.js';
 
 export async function verifyAccess(
   t: TestContext,
@@ -37,7 +39,7 @@ export async function verifyAccess(
     member = await initializeMembershipOperatorDataSource(env),
     org = await initializeOrganizationsOperatorDataSource(env);
   const members = new MembershipsService(member),
-    orgs = new OrganizationsService(org),
+    orgs = await organizationsFixture(org, env),
     identities = new IdentityService(app),
     appMembers = new MembershipsService(app),
     appOrgs = new OrganizationsService(app);
@@ -471,6 +473,19 @@ export async function verifyAccess(
           lines.push(String(line));
         };
         try {
+          await factory.read(b.principal, tenant.tenant.id, async (ctx) => {
+            assert.equal(
+              (await evaluator.can(ctx, extraCode, companyScope)).allowed,
+              false,
+            );
+            assert.deepEqual(await evaluator.scopesFor(ctx, extraCode), []);
+            assert.deepEqual(await evaluator.permissionsFor(ctx), []);
+          });
+          assert.equal(
+            lines.length,
+            0,
+            'Global deprecation without historical grants is silent',
+          );
           await factory.read(a.principal, tenant.tenant.id, async (ctx) => {
             assert.deepEqual(
               await evaluator.can(ctx, extraCode, companyScope),
@@ -584,6 +599,92 @@ export async function verifyAccess(
         } finally {
           await single.destroy();
         }
+      },
+    );
+    await t.test(
+      '[Trusted service / evaluator] Valid FK can retain an ACTIVE SQL assignment for a revoked membership, but service rejects and no effective access exists',
+      async () => {
+        const technicalRole = await writer.createRole(
+          tenant.tenant.id,
+          'Post-revocation SQL fixture',
+          'Discardable only',
+          op(),
+        );
+        await writer.grantPermission(
+          tenant.tenant.id,
+          technicalRole.id,
+          'foundation.probe.read',
+          op(),
+        );
+        await assert.rejects(
+          writer.assign(
+            tenant.tenant.id,
+            a.memberships[0],
+            technicalRole.id,
+            companyScope,
+            op(),
+          ),
+          (error) =>
+            typeof error === 'object' &&
+            error !== null &&
+            'code' in error &&
+            error.code === 'REFERENCE_UNAVAILABLE',
+        );
+        const operation = op();
+        await auth.transaction(async (manager) => {
+          await establishOperationContext(
+            manager,
+            'authorization',
+            operation,
+            tenant.tenant.id,
+          );
+          await manager.query(
+            "INSERT INTO \"authorization\".operation(request_id,tenant_id,operation_type,fingerprint,fingerprint_version,actor,actor_type,reason,technical_source) VALUES($1,$2,'ASSIGN',$3,2,$4,$5,$6,'fixture:SQL-trust-limit')",
+            [
+              operation.requestId,
+              tenant.tenant.id,
+              '0'.repeat(64),
+              operation.actor,
+              operation.actorType,
+              operation.reason,
+            ],
+          );
+          const [row] = await manager.query<{ status: string }[]>(
+            'INSERT INTO "authorization".role_assignment(tenant_id,membership_id,role_id,scope_unit_id,scope_type) VALUES($1,$2,$3,$4,\'COMPANY\') RETURNING status',
+            [
+              tenant.tenant.id,
+              a.memberships[0],
+              technicalRole.id,
+              companyScope.unitId,
+            ],
+          );
+          assert.equal(
+            row.status,
+            'ACTIVE',
+            'FK guarantees structural integrity, not membership availability',
+          );
+          await manager.query(
+            'UPDATE "authorization".operation SET result=\'{}\',completed_at=clock_timestamp() WHERE request_id=$1',
+            [operation.requestId],
+          );
+        });
+        await assert.rejects(
+          factory.read(a.principal, tenant.tenant.id, (ctx) =>
+            evaluator.can(ctx, 'foundation.probe.read', companyScope),
+          ),
+        );
+        await app.transaction(async (manager) => {
+          await manager.query(
+            "SELECT set_config('innoview.user_identity_id',$1,true),set_config('innoview.tenant_id',$2,true)",
+            [a.identity, tenant.tenant.id],
+          );
+          assert.deepEqual(
+            await manager.query(
+              'SELECT id FROM "authorization".role_assignment',
+            ),
+            [],
+          );
+        });
       },
     );
   } finally {

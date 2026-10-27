@@ -15,7 +15,8 @@ import {
   databaseFailure,
 } from '../security/security-events.js';
 import { hostname, userInfo } from 'node:os';
-import { Inject, Injectable } from '@nestjs/common';
+import { randomUUID } from 'node:crypto';
+import { Inject, Injectable, Optional } from '@nestjs/common';
 import { DataSource, EntityManager, EntityNotFoundError } from 'typeorm';
 import {
   Tenant,
@@ -76,7 +77,12 @@ export class OrganizationsService {
     );
     return row ?? null;
   }
-  constructor(@Inject(DataSource) private readonly source: DataSource) {}
+  constructor(
+    @Inject(DataSource) private readonly source: DataSource,
+    @Optional()
+    @Inject('organizations.pretenant-source')
+    private readonly provisioner?: DataSource,
+  ) {}
 
   async availableContextSummaries(tenantIds: string[], manager: EntityManager) {
     if (
@@ -116,6 +122,7 @@ export class OrganizationsService {
     args: Record<string, unknown>,
     context: OrganizationOperation,
     operation: (manager: EntityManager) => Promise<T>,
+    initialTenantId?: string,
   ): Promise<T> {
     let replay = false;
     try {
@@ -140,17 +147,27 @@ export class OrganizationsService {
         type,
         args,
       );
-      const result = await this.source.transaction(
+      const source =
+        type === 'CREATE_TENANT'
+          ? (this.provisioner ?? this.source)
+          : this.source;
+      const result = await source.transaction(
         'READ COMMITTED',
         async (manager) => {
           const [role] = await manager.query<{ trusted: boolean }[]>(
-            "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':organizations' AS trusted FROM pg_roles WHERE rolname=current_user",
+            "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':'||$1 AS trusted FROM pg_roles WHERE rolname=current_user",
+            [
+              type === 'CREATE_TENANT'
+                ? 'organizations_provisioner'
+                : 'organizations',
+            ],
           );
           if (!role?.trusted) throw new OrganizationOperationError();
           await establishOperationContext(
             manager,
             'organizations',
             technicalOperation(context),
+            tenantId ?? initialTenantId,
           );
           // Lock the tenant before the operation's FK takes KEY SHARE: upgrading
           // several concurrent FK locks to FOR UPDATE would otherwise deadlock.
@@ -286,6 +303,7 @@ export class OrganizationsService {
   ) {
     name = this.name(name);
     groupName = this.name(groupName);
+    const id = randomUUID();
     return this.write(
       'CREATE_TENANT',
       null,
@@ -294,7 +312,11 @@ export class OrganizationsService {
       async (manager) => {
         const tenant = await manager.save(
           Tenant,
-          manager.create(Tenant, { name: this.name(name), status: 'ACTIVE' }),
+          manager.create(Tenant, {
+            id,
+            name: this.name(name),
+            status: 'ACTIVE',
+          }),
         );
         const unit = await this.unit(manager, tenant.id, 'GROUP', groupName);
         const group = await manager.save(
@@ -303,6 +325,7 @@ export class OrganizationsService {
         );
         return { tenant, group, unit };
       },
+      id,
     );
   }
 
@@ -448,6 +471,9 @@ export class OrganizationsService {
     return this.source
       .transaction('REPEATABLE READ', async (manager) => {
         await manager.query('SET TRANSACTION READ ONLY');
+        await manager.query("SELECT set_config('innoview.tenant_id',$1,true)", [
+          tenantId,
+        ]);
         const structure = await this.getStructure(tenantId, manager);
         if (structure.tenant.status !== 'ACTIVE') return false;
         const units = new Map(structure.units.map((unit) => [unit.id, unit]));
@@ -515,8 +541,8 @@ export class OrganizationsService {
       "SELECT shobj_description(oid,'pg_authid')='innoview:'||current_database()||':organizations' AS trusted,NULLIF(current_setting('innoview.user_identity_id',true),'') AS identity,NULLIF(current_setting('innoview.tenant_id',true),'') AS tenant FROM pg_roles WHERE rolname=current_user",
     );
     if (
-      !scope?.trusted &&
-      (!canonicalUuid(scope?.identity) || scope.tenant !== tenantId)
+      scope?.tenant !== tenantId ||
+      (!scope.trusted && !canonicalUuid(scope.identity))
     ) {
       securityEvent('SECURITY_CONTEXT_MISSING');
       throw new Error('Validated tenant transaction required');

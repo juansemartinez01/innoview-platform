@@ -1,0 +1,1132 @@
+{
+  "seed": "innoview-authorization-20261026-v1",
+  "tenants": 500,
+  "roleAssignments": 50000,
+  "rolePermissions": [
+    {
+      "permissionsPerRole": 2,
+      "rows": "4032"
+    },
+    {
+      "permissionsPerRole": 40,
+      "rows": "80640"
+    }
+  ],
+  "methodology": "Separate discarded databases, same deterministic logical dataset; 3 warmups/30 repetitions; first observations are not OS/PostgreSQL-cold. Inclusive plan counters overlap. No SLA or CI timing thresholds.",
+  "rows": [
+    {
+      "tenantClass": "large",
+      "method": "can",
+      "narrow": {
+        "methodMs": {
+          "p50": 4.028900000004796,
+          "p95": 4.388800000000629
+        },
+        "transactionMs": {
+          "p50": 10.11210000000574,
+          "p95": 11.46530000000348
+        }
+      },
+      "wide": {
+        "methodMs": {
+          "p50": 4.573600000003353,
+          "p95": 5.114700000005541
+        },
+        "transactionMs": {
+          "p50": 12.113500000006752,
+          "p95": 14.16290000002482
+        }
+      },
+      "plans": [
+        {
+          "permissionsPerRole": 2,
+          "sharedHits": 91,
+          "sharedReads": 0,
+          "indexes": [
+            "assignment_member_scope",
+            "ix_membership_identity_status",
+            "tenant_directory_pkey",
+            "uq_active_role_permission",
+            "role_pkey",
+            "pk_business_group",
+            "uq_unit_tenant_id",
+            "pk_tenant",
+            "pk_branch",
+            "pk_company"
+          ],
+          "nodes": [
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        },
+        {
+          "permissionsPerRole": 40,
+          "sharedHits": 92,
+          "sharedReads": 0,
+          "indexes": [
+            "assignment_member_scope",
+            "ix_membership_identity_status",
+            "tenant_directory_pkey",
+            "uq_active_role_permission",
+            "role_pkey",
+            "pk_business_group",
+            "uq_unit_tenant_id",
+            "pk_tenant",
+            "pk_branch",
+            "pk_company"
+          ],
+          "nodes": [
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tenantClass": "large",
+      "method": "permissionsFor",
+      "narrow": {
+        "methodMs": {
+          "p50": 7.606200000001991,
+          "p95": 8.630300000004354
+        },
+        "transactionMs": {
+          "p50": 14.413699999997334,
+          "p95": 16.59900000000198
+        }
+      },
+      "wide": {
+        "methodMs": {
+          "p50": 37.862999999983,
+          "p95": 39.60470000002533
+        },
+        "transactionMs": {
+          "p50": 45.812999999994645,
+          "p95": 49.22160000001895
+        }
+      },
+      "plans": [
+        {
+          "permissionsPerRole": 2,
+          "sharedHits": 2059,
+          "sharedReads": 0,
+          "indexes": [
+            "ix_membership_identity_status",
+            "pk_business_group",
+            "tenant_directory_pkey",
+            "uq_unit_tenant_id",
+            "pk_unit",
+            "uq_unit_tenant_id_type",
+            "pk_tenant",
+            "pk_branch",
+            "pk_company",
+            "assignment_member_scope",
+            "uq_role_tenant_name",
+            "uq_active_role_permission"
+          ],
+          "nodes": [
+            {
+              "type": "Aggregate",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "m_9",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a_1",
+              "actualRows": 420,
+              "loops": 1,
+              "intermediateRows": 420,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 2,
+              "loops": 20,
+              "intermediateRows": 40,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "a",
+              "actualRows": 420,
+              "loops": 1,
+              "intermediateRows": 420,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Hash",
+              "actualRows": 40,
+              "loops": 1,
+              "intermediateRows": 40,
+              "peakMemoryKb": 13,
+              "hashBatches": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "g",
+              "actualRows": 40,
+              "loops": 1,
+              "intermediateRows": 40,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "u",
+              "actualRows": 21,
+              "loops": 840,
+              "intermediateRows": 17640,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        },
+        {
+          "permissionsPerRole": 40,
+          "sharedHits": 4366,
+          "sharedReads": 0,
+          "indexes": [
+            "ix_membership_identity_status",
+            "pk_business_group",
+            "tenant_directory_pkey",
+            "uq_unit_tenant_id",
+            "pk_unit",
+            "uq_unit_tenant_id_type",
+            "pk_tenant",
+            "pk_branch",
+            "pk_company",
+            "assignment_member_scope",
+            "uq_role_tenant_name",
+            "uq_active_role_permission"
+          ],
+          "nodes": [
+            {
+              "type": "Aggregate",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "m_9",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a_1",
+              "actualRows": 420,
+              "loops": 1,
+              "intermediateRows": 420,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 40,
+              "loops": 20,
+              "intermediateRows": 800,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Hash",
+              "actualRows": 40,
+              "loops": 1,
+              "intermediateRows": 40,
+              "peakMemoryKb": 12,
+              "hashBatches": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "a",
+              "actualRows": 420,
+              "loops": 1,
+              "intermediateRows": 420,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Hash",
+              "actualRows": 16800,
+              "loops": 1,
+              "intermediateRows": 16800,
+              "peakMemoryKb": 2798,
+              "hashBatches": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "g",
+              "actualRows": 800,
+              "loops": 1,
+              "intermediateRows": 800,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Hash",
+              "actualRows": 21,
+              "loops": 1,
+              "intermediateRows": 21,
+              "peakMemoryKb": 10,
+              "hashBatches": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "u",
+              "actualRows": 21,
+              "loops": 1,
+              "intermediateRows": 21,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tenantClass": "large",
+      "method": "scopesFor",
+      "narrow": {
+        "methodMs": {
+          "p50": 6.214499999994587,
+          "p95": 6.690600000001723
+        },
+        "transactionMs": {
+          "p50": 12.419499999996333,
+          "p95": 13.141900000002352
+        }
+      },
+      "wide": {
+        "methodMs": {
+          "p50": 7.344500000006519,
+          "p95": 8.026899999997113
+        },
+        "transactionMs": {
+          "p50": 13.432200000010198,
+          "p95": 15.065999999991618
+        }
+      },
+      "plans": [
+        {
+          "permissionsPerRole": 2,
+          "sharedHits": 2059,
+          "sharedReads": 0,
+          "indexes": [
+            "ix_membership_identity_status",
+            "pk_business_group",
+            "tenant_directory_pkey",
+            "uq_unit_tenant_id",
+            "pk_unit",
+            "uq_unit_tenant_id_type",
+            "pk_tenant",
+            "pk_branch",
+            "pk_company",
+            "assignment_member_scope",
+            "uq_role_tenant_name",
+            "uq_active_role_permission"
+          ],
+          "nodes": [
+            {
+              "type": "Aggregate",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "m_9",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a_1",
+              "actualRows": 420,
+              "loops": 1,
+              "intermediateRows": 420,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 2,
+              "loops": 20,
+              "intermediateRows": 40,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "a",
+              "actualRows": 420,
+              "loops": 1,
+              "intermediateRows": 420,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Hash",
+              "actualRows": 20,
+              "loops": 1,
+              "intermediateRows": 20,
+              "peakMemoryKb": 10,
+              "hashBatches": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "g",
+              "actualRows": 20,
+              "loops": 1,
+              "intermediateRows": 20,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "u",
+              "actualRows": 21,
+              "loops": 420,
+              "intermediateRows": 8820,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        },
+        {
+          "permissionsPerRole": 40,
+          "sharedHits": 4366,
+          "sharedReads": 0,
+          "indexes": [
+            "ix_membership_identity_status",
+            "pk_business_group",
+            "tenant_directory_pkey",
+            "uq_unit_tenant_id",
+            "pk_unit",
+            "uq_unit_tenant_id_type",
+            "pk_tenant",
+            "pk_branch",
+            "pk_company",
+            "assignment_member_scope",
+            "uq_role_tenant_name",
+            "uq_active_role_permission"
+          ],
+          "nodes": [
+            {
+              "type": "Aggregate",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "m_9",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a_1",
+              "actualRows": 420,
+              "loops": 1,
+              "intermediateRows": 420,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 40,
+              "loops": 20,
+              "intermediateRows": 800,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Hash",
+              "actualRows": 40,
+              "loops": 1,
+              "intermediateRows": 40,
+              "peakMemoryKb": 12,
+              "hashBatches": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "a",
+              "actualRows": 420,
+              "loops": 1,
+              "intermediateRows": 420,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Hash",
+              "actualRows": 20,
+              "loops": 1,
+              "intermediateRows": 20,
+              "peakMemoryKb": 10,
+              "hashBatches": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "g",
+              "actualRows": 20,
+              "loops": 1,
+              "intermediateRows": 20,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "u",
+              "actualRows": 21,
+              "loops": 420,
+              "intermediateRows": 8820,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tenantClass": "small",
+      "method": "can",
+      "narrow": {
+        "methodMs": {
+          "p50": 4.048999999999069,
+          "p95": 4.413000000000466
+        },
+        "transactionMs": {
+          "p50": 10.047100000003411,
+          "p95": 12.236100000001898
+        }
+      },
+      "wide": {
+        "methodMs": {
+          "p50": 4.030299999983981,
+          "p95": 4.299400000018068
+        },
+        "transactionMs": {
+          "p50": 10.143000000010943,
+          "p95": 11.412100000015926
+        }
+      },
+      "plans": [
+        {
+          "permissionsPerRole": 2,
+          "sharedHits": 91,
+          "sharedReads": 0,
+          "indexes": [
+            "assignment_member_scope",
+            "ix_membership_identity_status",
+            "tenant_directory_pkey",
+            "uq_active_role_permission",
+            "uq_role_tenant_id",
+            "pk_business_group",
+            "uq_unit_tenant_id",
+            "pk_tenant",
+            "uq_unit_tenant_id_type",
+            "pk_branch",
+            "pk_company"
+          ],
+          "nodes": [
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        },
+        {
+          "permissionsPerRole": 40,
+          "sharedHits": 92,
+          "sharedReads": 0,
+          "indexes": [
+            "assignment_member_scope",
+            "ix_membership_identity_status",
+            "tenant_directory_pkey",
+            "uq_active_role_permission",
+            "uq_role_tenant_id",
+            "pk_business_group",
+            "uq_unit_tenant_id",
+            "pk_tenant",
+            "uq_unit_tenant_id_type",
+            "pk_branch",
+            "pk_company"
+          ],
+          "nodes": [
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tenantClass": "small",
+      "method": "permissionsFor",
+      "narrow": {
+        "methodMs": {
+          "p50": 4.432800000002317,
+          "p95": 5.492600000005041
+        },
+        "transactionMs": {
+          "p50": 11.67500000000291,
+          "p95": 14.642699999996694
+        }
+      },
+      "wide": {
+        "methodMs": {
+          "p50": 7.192699999985052,
+          "p95": 8.103799999982584
+        },
+        "transactionMs": {
+          "p50": 13.772499999991851,
+          "p95": 16.203799999988405
+        }
+      },
+      "plans": [
+        {
+          "permissionsPerRole": 2,
+          "sharedHits": 275,
+          "sharedReads": 0,
+          "indexes": [
+            "ix_membership_identity_status",
+            "pk_business_group",
+            "tenant_directory_pkey",
+            "uq_unit_tenant_id_type",
+            "uq_unit_tenant_id",
+            "pk_tenant",
+            "pk_branch",
+            "pk_company",
+            "assignment_member_scope",
+            "uq_role_tenant_name",
+            "uq_active_role_permission"
+          ],
+          "nodes": [
+            {
+              "type": "Aggregate",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a_1",
+              "actualRows": 20,
+              "loops": 1,
+              "intermediateRows": 20,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "m_9",
+              "actualRows": 1,
+              "loops": 20,
+              "intermediateRows": 20,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 2,
+              "loops": 4,
+              "intermediateRows": 8,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "u",
+              "actualRows": 5,
+              "loops": 1,
+              "intermediateRows": 5,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "g",
+              "actualRows": 8,
+              "loops": 5,
+              "intermediateRows": 40,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "a",
+              "actualRows": 20,
+              "loops": 40,
+              "intermediateRows": 800,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        },
+        {
+          "permissionsPerRole": 40,
+          "sharedHits": 737,
+          "sharedReads": 0,
+          "indexes": [
+            "ix_membership_identity_status",
+            "pk_business_group",
+            "tenant_directory_pkey",
+            "uq_unit_tenant_id_type",
+            "uq_unit_tenant_id",
+            "pk_tenant",
+            "pk_branch",
+            "pk_company",
+            "assignment_member_scope",
+            "uq_role_tenant_name",
+            "uq_active_role_permission"
+          ],
+          "nodes": [
+            {
+              "type": "Aggregate",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a_1",
+              "actualRows": 20,
+              "loops": 1,
+              "intermediateRows": 20,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "m_9",
+              "actualRows": 1,
+              "loops": 20,
+              "intermediateRows": 20,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 40,
+              "loops": 4,
+              "intermediateRows": 160,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Hash",
+              "actualRows": 40,
+              "loops": 1,
+              "intermediateRows": 40,
+              "peakMemoryKb": 12,
+              "hashBatches": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "g",
+              "actualRows": 160,
+              "loops": 1,
+              "intermediateRows": 160,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Hash",
+              "actualRows": 5,
+              "loops": 1,
+              "intermediateRows": 5,
+              "peakMemoryKb": 9,
+              "hashBatches": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "u",
+              "actualRows": 5,
+              "loops": 1,
+              "intermediateRows": 5,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "a",
+              "actualRows": 20,
+              "loops": 800,
+              "intermediateRows": 16000,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "tenantClass": "small",
+      "method": "scopesFor",
+      "narrow": {
+        "methodMs": {
+          "p50": 4.137800000004063,
+          "p95": 4.649299999997311
+        },
+        "transactionMs": {
+          "p50": 10.050600000002305,
+          "p95": 10.778800000000047
+        }
+      },
+      "wide": {
+        "methodMs": {
+          "p50": 4.614399999991292,
+          "p95": 5.158599999995204
+        },
+        "transactionMs": {
+          "p50": 11.083099999988917,
+          "p95": 13.207799999974668
+        }
+      },
+      "plans": [
+        {
+          "permissionsPerRole": 2,
+          "sharedHits": 275,
+          "sharedReads": 0,
+          "indexes": [
+            "ix_membership_identity_status",
+            "pk_business_group",
+            "tenant_directory_pkey",
+            "uq_unit_tenant_id_type",
+            "uq_unit_tenant_id",
+            "pk_tenant",
+            "pk_branch",
+            "pk_company",
+            "assignment_member_scope",
+            "uq_role_tenant_name",
+            "uq_active_role_permission"
+          ],
+          "nodes": [
+            {
+              "type": "Aggregate",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a_1",
+              "actualRows": 20,
+              "loops": 1,
+              "intermediateRows": 20,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "m_9",
+              "actualRows": 1,
+              "loops": 20,
+              "intermediateRows": 20,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 2,
+              "loops": 4,
+              "intermediateRows": 8,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "a",
+              "actualRows": 20,
+              "loops": 1,
+              "intermediateRows": 20,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "g",
+              "actualRows": 4,
+              "loops": 20,
+              "intermediateRows": 80,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "u",
+              "actualRows": 5,
+              "loops": 20,
+              "intermediateRows": 100,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        },
+        {
+          "permissionsPerRole": 40,
+          "sharedHits": 737,
+          "sharedReads": 0,
+          "indexes": [
+            "ix_membership_identity_status",
+            "pk_business_group",
+            "tenant_directory_pkey",
+            "uq_unit_tenant_id_type",
+            "uq_unit_tenant_id",
+            "pk_tenant",
+            "pk_branch",
+            "pk_company",
+            "assignment_member_scope",
+            "uq_role_tenant_name",
+            "uq_active_role_permission"
+          ],
+          "nodes": [
+            {
+              "type": "Aggregate",
+              "actualRows": 1,
+              "loops": 1,
+              "intermediateRows": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_assignment",
+              "alias": "a_1",
+              "actualRows": 20,
+              "loops": 1,
+              "intermediateRows": 20,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "m_9",
+              "actualRows": 1,
+              "loops": 20,
+              "intermediateRows": 20,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Index Only Scan",
+              "relation": "role_permission",
+              "alias": "rp",
+              "actualRows": 40,
+              "loops": 4,
+              "intermediateRows": 160,
+              "heapFetches": 0,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "Hash",
+              "actualRows": 40,
+              "loops": 1,
+              "intermediateRows": 40,
+              "peakMemoryKb": 12,
+              "hashBatches": 1,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "a",
+              "actualRows": 20,
+              "loops": 1,
+              "intermediateRows": 20,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "g",
+              "actualRows": 4,
+              "loops": 20,
+              "intermediateRows": 80,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            },
+            {
+              "type": "CTE Scan",
+              "alias": "u",
+              "actualRows": 5,
+              "loops": 20,
+              "intermediateRows": 100,
+              "tempReadBlocks": 0,
+              "tempWrittenBlocks": 0
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

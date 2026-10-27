@@ -9,10 +9,8 @@ import {
   Injectable,
   NotFoundException,
   Req,
-  SetMetadata,
   UseGuards,
 } from '@nestjs/common';
-import { Reflector } from '@nestjs/core';
 import {
   AuthenticationGuard,
   type IdentityRequest,
@@ -22,13 +20,9 @@ import { AuthorizationReads } from './access.runtime.js';
 import {
   AUTHORIZATION_ACCESS_V1,
   type AuthorizationAccessV1,
-  type Scope,
 } from './access.contract.js';
 import { canonicalUuid } from '../security/security-events.js';
 
-const requirement = 'authorization.access@1.requirement';
-export const RequireAccess = (permission: string, scopeType: Scope['type']) =>
-  SetMetadata(requirement, { permission, scopeType });
 interface ProtectedRequest extends IdentityRequest {
   params: { tenantId?: string; unitId?: string };
   url: string;
@@ -36,9 +30,8 @@ interface ProtectedRequest extends IdentityRequest {
   authorizedProjection?: { id: string; name: string };
 }
 @Injectable()
-export class BusinessAuthorizationGuard implements CanActivate {
+export class CompanyDemonstrationGuard implements CanActivate {
   constructor(
-    private readonly reflector: Reflector,
     private readonly reads: AuthorizationReads,
     @Inject(AUTHORIZATION_ACCESS_V1)
     private readonly access: AuthorizationAccessV1,
@@ -46,13 +39,10 @@ export class BusinessAuthorizationGuard implements CanActivate {
   ) {}
   async canActivate(execution: ExecutionContext) {
     const req = execution.switchToHttp().getRequest<ProtectedRequest>();
-    const policy = this.reflector.get<{
-      permission: string;
-      scopeType: Scope['type'];
-    }>(requirement, execution.getHandler());
     if (
-      !policy ||
-      policy.scopeType !== 'COMPANY' ||
+      execution.getClass() !== AuthorizationDemonstrationController ||
+      execution.getHandler() !==
+        AuthorizationDemonstrationController.prototype.company ||
       !req.identity ||
       !canonicalUuid(req.params.tenantId) ||
       !canonicalUuid(req.params.unitId) ||
@@ -66,10 +56,14 @@ export class BusinessAuthorizationGuard implements CanActivate {
         req.identity,
         req.params.tenantId,
         async (context) => {
-          const decision = await this.access.can(context, policy.permission, {
-            type: policy.scopeType,
-            unitId: req.params.unitId!,
-          });
+          const decision = await this.access.can(
+            context,
+            'foundation.probe.read',
+            {
+              type: 'COMPANY',
+              unitId: req.params.unitId!,
+            },
+          );
           if (!decision.allowed) throw new ForbiddenException('Access denied');
           // Decision AND owner projection use this same manager/snapshot. Only
           // detached DTO leaves the callback, never context/manager/entities.
@@ -92,12 +86,11 @@ export class BusinessAuthorizationGuard implements CanActivate {
   }
 }
 @Controller('authorization/demo')
-@UseGuards(AuthenticationGuard, BusinessAuthorizationGuard)
+@UseGuards(AuthenticationGuard, CompanyDemonstrationGuard)
 export class AuthorizationDemonstrationController {
   @Get('tenants/:tenantId/companies/:unitId')
   @Header('Cache-Control', 'no-store')
-  @RequireAccess('foundation.probe.read', 'COMPANY')
-  company(@Req() req: ProtectedRequest) {
+  company(this: void, @Req() req: ProtectedRequest) {
     return req.authorizedProjection;
   }
 }

@@ -7,6 +7,8 @@ import {
   initializeAuthorizationOperatorDataSource,
   initializeMembershipOperatorDataSource,
   initializeOrganizationsOperatorDataSource,
+  initializeOrganizationsProvisionerDataSource,
+  initializeDirectoryMaintenanceDataSource,
 } from '../../apps/api/dist/persistence/data-sources.js';
 const pg = createRequire(
   new URL('../../apps/api/package.json', import.meta.url),
@@ -14,7 +16,7 @@ const pg = createRequire(
 
 export async function disposableAuthorization(
   operation,
-  { schema11 = false } = {},
+  { schema11 = false, empty = false } = {},
 ) {
   if (
     !process.env.TEST_POSTGRES_PASSWORD ||
@@ -39,8 +41,11 @@ export async function disposableAuthorization(
     'membership',
     'organizations',
     'authorization',
+    'organizations_provisioner',
+    'directory_maintenance',
   ]) {
-    env[`DB_${purpose.toUpperCase()}_USER`] = `bench_${purpose}_${suffix}`;
+    env[`DB_${purpose.toUpperCase()}_USER`] =
+      `bench_${purpose.slice(0, 18)}_${suffix}`;
     env[`DB_${purpose.toUpperCase()}_PASSWORD`] =
       randomBytes(24).toString('hex');
   }
@@ -66,7 +71,7 @@ export async function disposableAuthorization(
         (m) =>
           Number((m.name ?? m.constructor.name).slice(-13)) <= 1793037600000,
       );
-    await sources.migrator.runMigrations();
+    if (!empty) await sources.migrator.runMigrations();
     sources.migrator.migrations = allMigrations;
     await provisionDatabase(env);
     for (const [kind, initialize] of Object.entries({
@@ -74,6 +79,8 @@ export async function disposableAuthorization(
       authorization: initializeAuthorizationOperatorDataSource,
       membership: initializeMembershipOperatorDataSource,
       organizations: initializeOrganizationsOperatorDataSource,
+      provisioner: initializeOrganizationsProvisionerDataSource,
+      maintenance: initializeDirectoryMaintenanceDataSource,
     }))
       sources[kind] = await initialize(env);
     return await operation({ env, sources });
@@ -94,6 +101,8 @@ export async function disposableAuthorization(
           'membership',
           'organizations',
           'authorization',
+          'organizations_provisioner',
+          'directory_maintenance',
         ])
           await admin.query(
             `DROP ROLE IF EXISTS ${pg.escapeIdentifier(env[`DB_${purpose.toUpperCase()}_USER`])}`,

@@ -55,6 +55,11 @@ export async function establishOperationContext(
       tenantId,
     ]);
   await manager.query("SELECT set_config('lock_timeout','8s',true)");
+  if (namespace === 'organizations' && tenantId)
+    await manager.query(
+      "SELECT pg_advisory_xact_lock(hashtextextended('innoview:organization-write:'||$1,0))",
+      [tenantId],
+    );
 }
 export class TrustedOperationTransientError extends Error {
   readonly retryable = true;
@@ -68,6 +73,7 @@ export function transientFailure(error: unknown): string | null {
   // diagnostic, never log the message or treat arbitrary SQL errors as retryable.
   if (
     error instanceof Error &&
+    error.name === 'Error' &&
     !('code' in error) &&
     [
       'timeout exceeded when trying to connect',
